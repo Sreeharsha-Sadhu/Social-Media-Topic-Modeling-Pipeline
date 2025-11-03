@@ -1,0 +1,8 @@
+pandas
+psycopg2-binary
+ipython
+pyspark
+networkx
+tqdm
+bertopic
+transformers
