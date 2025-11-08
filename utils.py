@@ -5,7 +5,27 @@ import psycopg2
 from sqlalchemy import create_engine
 from IPython.display import clear_output
 import config
+from pyspark.sql import SparkSession
+from pyspark import SparkConf
 
+_spark_session = None
+
+def get_spark_session():
+    """Initializes (or reuses) a SparkSession based on config."""
+    global _spark_session
+    if _spark_session is None:
+        print(f"🧩 Initializing SparkSession for {config.SPARK_APP_NAME}...")
+        conf = (
+            SparkConf()
+            .setAppName(config.SPARK_APP_NAME)
+            .setMaster(config.SPARK_MASTER)
+            .set("spark.sql.execution.arrow.pyspark.enabled", "true")
+            .set("spark.sql.repl.eagerEval.enabled", "true")
+            .set("spark.driver.memory", "4g")
+        )
+        _spark_session = SparkSession.builder.config(conf=conf).getOrCreate()
+        print(f"✅ SparkSession started on {config.SPARK_MASTER}")
+    return _spark_session
 
 def get_db_connection():
     """Establishes a new (psycopg2) connection to the PostgreSQL database."""

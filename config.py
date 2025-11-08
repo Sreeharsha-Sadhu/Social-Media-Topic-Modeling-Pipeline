@@ -30,3 +30,13 @@ USERS_JSON_PATH = os.path.join(DATA_DIR, "users.json")
 EDGELIST_PATH = os.path.join(DATA_DIR, "follows.edgelist")
 FOLLOWS_JSON_PATH = os.path.join(DATA_DIR, "follows.json")
 POSTS_JSON_PATH = os.path.join(DATA_DIR, "posts.json")
+
+
+# --- Spark Configuration ---
+USE_SPARK_ETL = os.getenv("USE_SPARK_ETL", "false").lower() == "true"
+SPARK_MASTER = os.getenv("SPARK_MASTER", "local[*]")
+SPARK_APP_NAME = os.getenv("SPARK_APP_NAME", "SocialMediaETL")
+
+# --- Spark Analysis Configuration ---
+USE_SPARK_ANALYSIS = os.getenv("USE_SPARK_ANALYSIS", "false").lower() == "true"
+SPARK_ANALYSIS_TOPICS = int(os.getenv("SPARK_ANALYSIS_TOPICS", "20"))
