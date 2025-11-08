@@ -1,0 +1,19 @@
+# .gitignore
+
+# Python
+__pycache__/
+venv/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+
+# Data
+data/
+
+test/
+
+test/ContentSummarizer.ipynb
+test/redditApiTest.ipynb

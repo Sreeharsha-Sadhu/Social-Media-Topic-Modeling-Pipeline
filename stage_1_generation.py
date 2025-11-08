@@ -19,15 +19,15 @@ AVG_FOLLOWS_PER_USER = 8
 
 # --- ADDED: Subreddit mapping ---
 SUBREDDIT_MAP = {
-    "AI Researcher": ["r/MachineLearning", "r/LocalLLaMA", "r/singularity"],
-    "Data Scientist": ["r/datascience", "r/dataanalysis", "r/Python"],
-    "Web Developer": ["r/webdev", "r/reactjs", "r/node"],
-    "Financial Analyst": ["r/wallstreetbets", "r/StockMarket", "r/SecurityAnalysis"],
-    "NBA Fanatic": ["r/nba", "r/lakers", "r/bostonceltics"],
-    "Indie Gamer": ["r/IndieGaming", "r/Games", "r/StardewValley"],
-    "Political Commentator": ["r/politics", "r/PoliticalDiscussion", "r/geopolitics"],
-    "World Traveler": ["r/travel", "r/solotravel", "r/digitalnomad"],
-    "Aspiring Chef": ["r/Cooking", "r/AskCulinary", "r/Breadit"]
+    "AI Researcher": ["MachineLearning", "LocalLLaMA", "singularity"],
+    "Data Scientist": ["datascience", "dataanalysis", "Python"],
+    "Web Developer": ["webdev", "reactjs", "node"],
+    "Financial Analyst": ["wallstreetbets", "StockMarket", "SecurityAnalysis"],
+    "NBA Fanatic": ["nba", "lakers", "bostonceltics"],
+    "Indie Gamer": ["IndieGaming", "Games", "StardewValley"],
+    "Political Commentator": ["politics", "PoliticalDiscussion", "geopolitics"],
+    "World Traveler": ["travel", "solotravel", "digitalnomad"],
+    "Aspiring Chef": ["Cooking", "AskCulinary", "Breadit"]
 }
 
 

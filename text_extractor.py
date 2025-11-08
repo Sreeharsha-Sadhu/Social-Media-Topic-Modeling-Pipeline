@@ -35,10 +35,9 @@ def extract_text_from_url(url):
 def get_reddit_client():
     """Initializes the PRAW Reddit client."""
     return praw.Reddit(
-        client_id=config.REDDIT_CLIENT_ID,
-        client_secret=config.REDDIT_CLIENT_SECRET,
-        user_agent=config.REDDIT_USER_AGENT,
-        read_only=True
+        client_id="jvwRh7vJI6ENPvtmtSIx7A",
+        client_secret="GLl0aSeEjOKtIokHyIVBnMEd55U1AA",
+        user_agent="windows:SocialAnalyzer:v1.0 by /u/sonilash",
     )
 
 
