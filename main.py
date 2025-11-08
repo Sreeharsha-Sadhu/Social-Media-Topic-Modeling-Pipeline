@@ -1,14 +1,22 @@
 # main.py
 
 import sys
+import getpass  # <-- ADDED for securely getting passwords
 import utils
 import stage_1_generation
 import stage_2_content
 import stage_3_etl
 import stage_4_analysis
 import stage_5_ui_helpers
-import live_analyzer  # <-- ADDED
+# --- MODIFIED IMPORTS ---
+import live_analyzer
+from live_analyzer import (
+    analyze_reddit_feed,
+    analyze_linkedin_feed,
+    analyze_twitter_feed
+)
 
+# ------------------------
 try:
     import stage_3_etl_spark_demo
     
@@ -32,6 +40,7 @@ def setup_database():
     input("\nPress Enter to return to the menu...")
 
 
+# (stage_1, 2, 3, 4, 5 functions are unchanged)
 def run_stage_1():
     utils.clear_screen()
     stage_1_generation.main()
@@ -75,8 +84,7 @@ def run_stage_4():
     try:
         stage_4_analysis.run_global_analysis()
     except Exception as e:
-        print(f"--- 🚨 A critical error occurred during analysis ---")
-        print(f"Error: {e}")
+        print(f"--- 🚨 A critical error occurred during analysis --- \nError: {e}")
     input("\nPress Enter to return to the menu...")
 
 
@@ -86,21 +94,51 @@ def run_stage_5():
     input("\nPress Enter to return to the menu...")
 
 
-# --- NEW: Function to run the live analysis ---
-def run_live_analysis():
-    utils.clear_screen()
-    print("This will fetch live data from the Reddit API.")
-    print("It requires a working internet connection and valid API keys in config.py")
-    
-    stage_5_ui_helpers.list_all_users()
-    user_id = input("\nEnter User ID to analyze (e.g., user_1): ")
-    if not user_id:
-        print("Invalid User ID.")
-        input("\nPress Enter to return to the menu...")
-        return
-    
-    live_analyzer.analyze_live_feed(user_id)
-    input("\nPress Enter to return to the menu...")
+# --- MODIFIED: This is now a sub-menu ---
+def run_live_analysis_menu():
+    """Shows a sub-menu for choosing a live data source."""
+    while True:
+        utils.clear_screen()
+        print("--- 📡 Analyze Live Feed ---")
+        print("1. Analyze Reddit Feed (using user's subreddits)")
+        print("2. Analyze Twitter/X Feed (requires login)")
+        print("3. Analyze LinkedIn Feed (requires login)")
+        print("4. Back to Main Menu")
+        print("-" * 50)
+        choice = input("Enter your choice (1-4): ")
+        
+        if choice == '1':
+            utils.clear_screen()
+            stage_5_ui_helpers.list_all_users()
+            user_id = input("\nEnter User ID to analyze (e.g., user_1): ")
+            if user_id:
+                analyze_reddit_feed(user_id)
+            input("\nPress Enter to return...")
+        
+        elif choice == '2':
+            utils.clear_screen()
+            print("--- Twitter/X Login ---")
+            print("Your credentials are NOT saved and are used only for this session.")
+            username = input("Enter Twitter/X Email or Username: ")
+            password = input("Enter Twitter/X Password: ")
+            if username and password:
+                analyze_twitter_feed(username, password)
+            input("\nPress Enter to return...")
+        
+        elif choice == '3':
+            utils.clear_screen()
+            print("--- LinkedIn Login ---")
+            print("Your credentials are NOT saved and are used only for this session.")
+            username = input("Enter LinkedIn Email: ")
+            password = input("Enter LinkedIn Password: ")  # Hides password
+            if username and password:
+                analyze_linkedin_feed(username, password)
+            input("\nPress Enter to return...")
+        
+        elif choice == '4':
+            break
+        else:
+            input("Invalid choice. Press Enter to try again...")
 
 
 def run_spark_demo():
@@ -129,7 +167,7 @@ def main_menu():
         "4": {"text": "Run Stage 3: Run ETL Pipeline (Pandas)", "action": run_stage_3},
         "5": {"text": "Run Stage 4: Generate Global Topic Model (Batch AI)", "action": run_stage_4},
         "6": {"text": "Run Stage 5: View Global Topic Results", "action": run_stage_5},
-        "7": {"text": "Analyze Live Reddit Feed (New!)", "action": run_live_analysis},  # <-- ADDED
+        "7": {"text": "Analyze Live Feed (Reddit, Twitter, LinkedIn)", "action": run_live_analysis_menu},
         "8": {"text": "List All Users", "action": stage_5_ui_helpers.list_all_users},
         "9": {"text": "Exit", "action": lambda: sys.exit("Exiting. Goodbye!")}
     }
