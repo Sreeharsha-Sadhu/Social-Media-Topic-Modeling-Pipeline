@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourcePerFileMappings">
-    <file url="file://$PROJECT_DIR$/_3_etl.py" value="05128519-518c-4a91-9ce5-e6d23cb41f71" />
-    <file url="file://$PROJECT_DIR$/_4_analysis.py" value="05128519-518c-4a91-9ce5-e6d23cb41f71" />
+    <file url="file://$PROJECT_DIR$/stage_3_etl.py" value="05128519-518c-4a91-9ce5-e6d23cb41f71" />
+    <file url="file://$PROJECT_DIR$/stage_4_analysis.py" value="05128519-518c-4a91-9ce5-e6d23cb41f71" />
   </component>
 </project>

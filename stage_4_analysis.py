@@ -1,10 +1,9 @@
 # stage_4_analysis.py
 # (Replaces stage_4_spark_analysis.py)
-# This is a 100% Spark-free, pure Python/Pandas analysis pipeline.
+# This version fixes all warnings and improves the prompt.
 
 import torch
 import pandas as pd
-# --- NO MORE SPARK IMPORTS ---
 from sklearn.cluster import KMeans as SklearnKMeans
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
@@ -14,41 +13,43 @@ from tqdm import tqdm
 import config
 import utils
 
-# --- 1. Global Caching for Summarizer (Unchanged) ---
+# --- 1. Global Caching for LLM ---
 model_cache = {}
 
 
-def get_summarizer_pipeline():
+def get_llm_pipeline():
     """
-    Loads and caches the BART summarization pipeline.
-    Uses GPU (device=0) and FP16 (float16) for optimization.
+    Loads and caches the FLAN-T5-Large text-generation pipeline.
     """
-    if "summarizer" not in model_cache:
-        print("--- Caching: Loading BART summarization model (distilbart-cnn-12-6) to GPU with FP16 ---")
+    if "llm" not in model_cache:
+        print("--- Caching: Loading FLAN-T5-Large model (770M params) to GPU with FP16 ---")
+        print("   (This may take several minutes and >3GB of VRAM on first run)")
         
+        model_name = "google/flan-t5-large"
+        
+        # --- FIX: Use dtype=torch.float16 ---
         if not torch.cuda.is_available():
-            print("--- WARNING: CUDA not available. Loading model on CPU. This will be very slow. ---")
-            model_cache["summarizer"] = pipeline(
-                "summarization",
-                model="sshleifer/distilbart-cnn-12-6"
+            print("--- WARNING: CUDA not available. Loading model on CPU. This will be VERY slow. ---")
+            model_cache["llm"] = pipeline(
+                "text2text-generation",
+                model=model_name
             )
         else:
-            model_cache["summarizer"] = pipeline(
-                "summarization",
-                model="sshleifer/distilbart-cnn-12-6",
+            model_cache["llm"] = pipeline(
+                "text2text-generation",
+                model=model_name,
                 device=0,
-                torch_dtype=torch.float16
+                dtype=torch.float16  # Fixed 'torch_dtype' warning
             )
-    return model_cache["summarizer"]
+    return model_cache["llm"]
 
 
-# --- 2. Main Analysis Function (Pure Pandas) ---
+# --- 2. Main Analysis Function (Upgraded) ---
 def run_global_analysis():
     """
-    Runs the entire pipeline.
-    Uses Pandas/SQLAlchemy to load/save and Pandas/SKlearn for all AI.
+    Runs the entire pipeline with fixed prompts and settings.
     """
-    print("--- Starting Stage 4: Global Analysis (Pure Pandas/SKlearn) ---")
+    print("--- Starting Stage 4: Global Analysis (FLAN-T5-Large) ---")
     
     try:
         engine = utils.get_sqlalchemy_engine()
@@ -63,7 +64,7 @@ def run_global_analysis():
         sql_query = "SELECT post_id, cleaned_content FROM posts WHERE cleaned_content IS NOT NULL AND cleaned_content != ''"
         pd_posts = pd.read_sql(sql_query, engine)
         
-        if len(pd_posts) < 20:  # Need a minimum for clustering
+        if len(pd_posts) < 20:
             print(f"Not enough posts ({len(pd_posts)}) to analyze. Aborting.")
             return False
         
@@ -87,18 +88,43 @@ def run_global_analysis():
         kmeans = SklearnKMeans(n_clusters=NUM_TOPICS, random_state=0, n_init=10)
         pd_posts['topic_id'] = kmeans.fit_predict(embeddings)
         
-        # --- Step 4: Summarization (in-driver) ---
-        print("Summarizing topics (in-driver)...")
-        summarizer = get_summarizer_pipeline()
+        # --- Step 4: Summarization (with new model and prompt) ---
+        print("Summarizing topics (in-driver with FLAN-T5-Large)...")
+        generator = get_llm_pipeline()
         
         topic_summaries = []
         
         for topic_id, group_df in tqdm(pd_posts.groupby('topic_id'), total=NUM_TOPICS):
+            
             full_text = " . ".join(group_df['cleaned_content'].tolist())
-            truncated_text = full_text[:4500]
+            
+            # --- NEW PROMPT ---
+            # This prompt is more direct and content-focused.
+            prompt = f"""
+Instructions: Read the following social media posts and write a concise, abstractive summary. The summary must be a coherent paragraph that captures the main topic and sentiment of the discussion. Do not just copy and paste sentences.
+
+Posts:
+{full_text}
+
+Summary:
+"""
             
             try:
-                summary = summarizer(truncated_text, max_length=150, min_length=30, do_sample=False)[0]['summary_text']
+                # --- NEW GENERATOR CALL ---
+                # This call fixes all warnings:
+                # 1. truncation=True: Truncates the input prompt
+                # 2. max_length=512: Sets the *input* limit, fixing the (1036 > 512) warning
+                # 3. max_new_tokens=150: Sets the *output* limit, fixing the conflict warning
+                summary = generator(
+                    prompt,
+                    truncation=True,
+                    max_length=512,
+                    max_new_tokens=150,
+                    min_length=30,
+                    do_sample=False,
+                    no_repeat_ngram_size=2
+                )[0]['generated_text']
+            
             except Exception as e:
                 print(f"Error summarizing topic {topic_id}: {e}")
                 summary = f"Error generating summary: {e}"
@@ -117,7 +143,6 @@ def run_global_analysis():
                 cur.execute("TRUNCATE TABLE global_topics, post_topic_mapping RESTART IDENTITY CASCADE;")
                 conn.commit()
         
-        # Save new results using Pandas to_sql
         pd_summaries.to_sql("global_topics", engine, if_exists='append', index=False)
         pd_mappings.to_sql("post_topic_mapping", engine, if_exists='append', index=False)
         
@@ -137,7 +162,7 @@ def run_global_analysis():
         print("Analysis process finished.")
 
 
-# --- Database Setup Function (Rewritten to be standalone) ---
+# --- Database Setup Function (Unchanged) ---
 def setup_database_tables():
     """
     Creates/Re-creates the tables for this new analysis pipeline.

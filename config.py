@@ -9,11 +9,14 @@ DB_PASS = "12345678"
 DB_HOST = "localhost"
 DB_PORT = "5432"
 
-# --- Project Structure ---
-# Get the absolute path of the directory this file is in
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# --- ADDED: Reddit API Configuration ---
+REDDIT_CLIENT_ID = "TjaMaDMN5BsYiCgHUtlQOg"
+REDDIT_CLIENT_SECRET = "oe_O8hyiyvhdI9zPlo0bRQGcQIekMw"
+REDDIT_USER_AGENT = "SocialMediaAnalyzer v1.0 by /u/Sonilash"
+# ------------------------------------
 
-# Data directory
+# --- Project Structure ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # --- File Paths ---

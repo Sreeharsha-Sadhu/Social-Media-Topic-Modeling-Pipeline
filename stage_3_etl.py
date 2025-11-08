@@ -1,5 +1,4 @@
 # stage_3_etl.py
-# (Replaces the PySpark version with a 100% Pandas version)
 
 import psycopg2
 import pandas as pd
@@ -7,13 +6,14 @@ import re
 import config
 import utils
 
-# SQL to create the base tables (unchanged)
+# --- MODIFIED: Added 'subreddits' column ---
 CREATE_TABLES_SQL = """
                     CREATE TABLE IF NOT EXISTS users \
                     ( \
-                        user_id  TEXT PRIMARY KEY, \
-                        username TEXT, \
-                        personas TEXT[]
+                        user_id    TEXT PRIMARY KEY, \
+                        username   TEXT, \
+                        personas   TEXT[], \
+                        subreddits TEXT[] -- ADDED
                     );
                     CREATE TABLE IF NOT EXISTS follows \
                     ( \
@@ -30,8 +30,9 @@ CREATE_TABLES_SQL = """
                         created_at      TIMESTAMP
                     ); \
                     """
+# ---------------------------------------------
 
-# SQL to truncate all tables (unchanged, still the best way)
+# (TRUNCATE_ALL_SQL and TRUNCATE_STAGE3_SQL are unchanged from your working version)
 TRUNCATE_ALL_SQL = """
                    TRUNCATE TABLE
                        users,
@@ -52,7 +53,6 @@ TRUNCATE_STAGE3_SQL = """
 
 
 def create_tables():
-    """Creates the core DB tables if they don't exist."""
     print("--- Stage 3.A: Creating Core Tables ---")
     try:
         with utils.get_db_connection() as conn:
@@ -66,16 +66,13 @@ def create_tables():
 
 
 def run_etl():
-    """Runs the full ETL pipeline: Truncate and load with Pandas."""
     print("\n--- Starting Stage 3.B: Pandas ETL ---")
     
-    # --- 1. Prerequisite Check ---
     success, msg = utils.check_file_prerequisites(3)
     if not success:
         print(f"🚨 ERROR: {msg}")
         return False
     
-    # --- 2. Truncate Tables ---
     print("Stage 3.B.1: Truncating old data...")
     try:
         with utils.get_db_connection() as conn:
@@ -93,28 +90,28 @@ def run_etl():
         print(f"Error details: {e}")
         return False
     
-    # --- 3. Run Pandas ETL ---
     print("Stage 3.B.2: Initializing SQLAlchemy engine...")
     try:
         engine = utils.get_sqlalchemy_engine()
         
-        # --- USERS ---
+        # --- USERS (No change needed) ---
+        # Pandas and SQLAlchemy are smart enough to handle the new
+        # 'subreddits' column (which is a list -> TEXT[]) automatically.
         print("Processing 'users' data...")
         df_users = pd.read_json(config.USERS_JSON_PATH, orient='records')
         df_users.to_sql("users", engine, if_exists='append', index=False)
         print(f"Successfully loaded {len(df_users)} users.")
         
-        # --- FOLLOWS ---
+        # --- FOLLOWS (Unchanged) ---
         print("Processing 'follows' data...")
         df_follows = pd.read_json(config.FOLLOWS_JSON_PATH, orient='records')
         df_follows.to_sql("follows", engine, if_exists='append', index=False)
         print(f"Successfully loaded {len(df_follows)} follows.")
         
-        # --- POSTS ---
+        # --- POSTS (Unchanged) ---
         print("Processing 'posts' data (with Pandas)...")
         df_posts = pd.read_json(config.POSTS_JSON_PATH, orient='records')
         
-        # Perform cleaning using Pandas.Series.str methods
         cleaned_content = df_posts['content'].str.lower()
         cleaned_content = cleaned_content.str.replace(r'http\S+', '', regex=True)
         cleaned_content = cleaned_content.str.replace(r'[^a-z0-9\s]', '', regex=True)
@@ -123,8 +120,6 @@ def run_etl():
         cleaned_content = cleaned_content.replace('', None)
         
         df_posts['cleaned_content'] = cleaned_content
-        
-        # Convert timestamp string to datetime object for SQL
         df_posts['created_at'] = pd.to_datetime(df_posts['created_at'])
         
         df_posts.to_sql("posts", engine, if_exists='append', index=False)

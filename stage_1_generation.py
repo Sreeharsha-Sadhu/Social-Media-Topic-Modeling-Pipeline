@@ -1,13 +1,15 @@
 # stage_1_generation.py
+# (Only showing modified sections)
 
 import networkx as nx
 import random
 import json
 import os
-import config  # Import our new config file
+import config
 
 # --- Configuration ---
 NUM_USERS = 25
+# (PERSONAS list is unchanged)
 PERSONAS = [
     "AI Researcher", "Data Scientist", "Web Developer",
     "Financial Analyst", "NBA Fanatic", "Indie Gamer",
@@ -15,19 +17,47 @@ PERSONAS = [
 ]
 AVG_FOLLOWS_PER_USER = 8
 
+# --- ADDED: Subreddit mapping ---
+SUBREDDIT_MAP = {
+    "AI Researcher": ["r/MachineLearning", "r/LocalLLaMA", "r/singularity"],
+    "Data Scientist": ["r/datascience", "r/dataanalysis", "r/Python"],
+    "Web Developer": ["r/webdev", "r/reactjs", "r/node"],
+    "Financial Analyst": ["r/wallstreetbets", "r/StockMarket", "r/SecurityAnalysis"],
+    "NBA Fanatic": ["r/nba", "r/lakers", "r/bostonceltics"],
+    "Indie Gamer": ["r/IndieGaming", "r/Games", "r/StardewValley"],
+    "Political Commentator": ["r/politics", "r/PoliticalDiscussion", "r/geopolitics"],
+    "World Traveler": ["r/travel", "r/solotravel", "r/digitalnomad"],
+    "Aspiring Chef": ["r/Cooking", "r/AskCulinary", "r/Breadit"]
+}
+
+
+# ---------------------------------
 
 def create_users(num_users, personas):
     users = []
     for i in range(1, num_users + 1):
         primary_persona = random.choice(personas)
         secondary_persona = random.choice([p for p in personas if p != primary_persona])
+        
+        # --- MODIFIED: Add subreddits based on persona ---
+        user_subreddits = list(set(
+            SUBREDDIT_MAP[primary_persona] +
+            random.sample(SUBREDDIT_MAP[secondary_persona], 1)
+        ))
+        random.shuffle(user_subreddits)
+        # ----------------------------------------------
+        
         users.append({
             "user_id": f"user_{i}",
             "username": f"user_{i}",
-            "personas": [primary_persona, secondary_persona]
+            "personas": [primary_persona, secondary_persona],
+            "subreddits": user_subreddits  # <-- ADDED FIELD
         })
     return users
 
+
+# (The rest of the file, create_social_graph and main, is unchanged)
+# (Copy/paste the rest of your existing stage_1_generation.py file here)
 
 def create_social_graph(users, avg_follows):
     G = nx.DiGraph()
@@ -57,7 +87,6 @@ def create_social_graph(users, avg_follows):
 
 
 def main():
-    """Main function to run Stage 1."""
     print(f"Creating {NUM_USERS} users...")
     users = create_users(NUM_USERS, PERSONAS)
     
@@ -68,14 +97,11 @@ def main():
     print(f"Total users created: {len(users)}")
     print(f"Social Graph: {social_graph.number_of_nodes()} nodes, {social_graph.number_of_edges()} edges.")
     
-    # Create data directory using config
     os.makedirs(config.DATA_DIR, exist_ok=True)
     
-    # Save users list
     with open(config.USERS_JSON_PATH, "w") as f:
         json.dump(users, f, indent=2)
     
-    # Save the graph edges
     nx.write_edgelist(social_graph, config.EDGELIST_PATH)
     
     print(f"\nUsers list saved to '{config.USERS_JSON_PATH}'")
@@ -83,5 +109,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # This allows running the file directly: python stage_1_generation.py
     main()

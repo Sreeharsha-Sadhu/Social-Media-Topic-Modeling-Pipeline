@@ -1,5 +1,4 @@
 # stage_5_ui_helpers.py
-# (No changes to list_all_users function)
 
 import pandas as pd
 import utils
@@ -8,30 +7,30 @@ import utils
 def list_all_users():
     """Fetches and displays all users from the database."""
     print("--- 👤 All Users ---")
-    conn = None
+    engine = None
     try:
-        conn = utils.get_db_connection()
-        df = pd.read_sql("SELECT user_id, username, personas FROM users ORDER BY user_id", conn)
+        # --- FIX: Use SQLAlchemy engine for Pandas ---
+        engine = utils.get_sqlalchemy_engine()
+        df = pd.read_sql("SELECT user_id, username, personas FROM users ORDER BY user_id", engine)
         print(df.to_string())
     except Exception as e:
         print(f"🚨 Error listing users: {e}")
         print("Have you run the 'Setup Database' and 'Run ETL' options yet?")
     finally:
-        if conn:
-            conn.close()
+        if engine:
+            engine.dispose()
 
 
-# --- MODIFIED FUNCTION ---
 def view_global_topics():
     """
     Fetches and displays the globally generated topics and their summaries.
     """
     print(f"\n--- 📈 Viewing Global Topic Summaries ---")
-    conn = None
+    engine = None
     try:
-        conn = utils.get_db_connection()
+        # --- FIX: Use SQLAlchemy engine for Pandas ---
+        engine = utils.get_sqlalchemy_engine()
         
-        # New query to join global_topics with post_topic_mapping to get counts
         query = """
                 SELECT gt.topic_id, \
                        gt.summary_text, \
@@ -41,7 +40,7 @@ def view_global_topics():
                 GROUP BY gt.topic_id, gt.summary_text
                 ORDER BY post_count DESC; \
                 """
-        df = pd.read_sql(query, conn)
+        df = pd.read_sql(query, engine)
         
         if df.empty:
             print("No results found. Please run 'Stage 4: Generate Global Topic Model' first.")
@@ -56,5 +55,5 @@ def view_global_topics():
     except Exception as e:
         print(f"🚨 Error viewing results: {e}")
     finally:
-        if conn:
-            conn.close()
+        if engine:
+            engine.dispose()
