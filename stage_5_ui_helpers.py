@@ -11,7 +11,7 @@ def list_all_users():
     try:
         # --- FIX: Use SQLAlchemy engine for Pandas ---
         engine = utils.get_sqlalchemy_engine()
-        df = pd.read_sql("SELECT user_id, username, personas FROM users ORDER BY user_id", engine)
+        df = pd.read_sql("SELECT user_id, username, personas, subreddits FROM users ORDER BY user_id", engine)
         print(df.to_string())
     except Exception as e:
         print(f"🚨 Error listing users: {e}")
