@@ -5,34 +5,41 @@ import pandas as pd
 import re
 import config
 import utils
+from sqlalchemy.types import ARRAY, String
 
-# --- MODIFIED: Added 'subreddits' column ---
+# --- MODIFIED SECTION ---
+# We add DROP TABLE commands to force the schema to update
+# when 'Setup Database' is run.
 CREATE_TABLES_SQL = """
+                    DROP TABLE IF EXISTS posts CASCADE;
+                    DROP TABLE IF EXISTS follows CASCADE;
+                    DROP TABLE IF EXISTS users CASCADE;
+
                     CREATE TABLE IF NOT EXISTS users \
                     ( \
                         user_id    TEXT PRIMARY KEY, \
                         username   TEXT, \
                         personas   TEXT[], \
-                        subreddits TEXT[] -- ADDED
+                        subreddits TEXT[]
                     );
                     CREATE TABLE IF NOT EXISTS follows \
                     ( \
-                        follower_id TEXT REFERENCES users (user_id), \
-                        followed_id TEXT REFERENCES users (user_id), \
+                        follower_id TEXT REFERENCES users (user_id) ON DELETE CASCADE, \
+                        followed_id TEXT REFERENCES users (user_id) ON DELETE CASCADE, \
                         PRIMARY KEY (follower_id, followed_id)
                     );
                     CREATE TABLE IF NOT EXISTS posts \
                     ( \
                         post_id         TEXT PRIMARY KEY, \
-                        author_id       TEXT REFERENCES users (user_id), \
+                        author_id       TEXT REFERENCES users (user_id) ON DELETE CASCADE, \
                         content         TEXT, \
                         cleaned_content TEXT, \
                         created_at      TIMESTAMP
                     ); \
                     """
-# ---------------------------------------------
+# --- END MODIFIED SECTION ---
 
-# (TRUNCATE_ALL_SQL and TRUNCATE_STAGE3_SQL are unchanged from your working version)
+# TRUNCATE SQL (unchanged)
 TRUNCATE_ALL_SQL = """
                    TRUNCATE TABLE
                        users,
@@ -53,7 +60,8 @@ TRUNCATE_STAGE3_SQL = """
 
 
 def create_tables():
-    print("--- Stage 3.A: Creating Core Tables ---")
+    """Creates the core DB tables. Now DESTRUCTIVE."""
+    print("--- Stage 3.A: Forcing recreation of Core Tables ---")
     try:
         with utils.get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -66,6 +74,7 @@ def create_tables():
 
 
 def run_etl():
+    """Runs the full ETL pipeline: Truncate and load with Pandas."""
     print("\n--- Starting Stage 3.B: Pandas ETL ---")
     
     success, msg = utils.check_file_prerequisites(3)
@@ -94,27 +103,34 @@ def run_etl():
     try:
         engine = utils.get_sqlalchemy_engine()
         
-        # --- USERS (No change needed) ---
-        # Pandas and SQLAlchemy are smart enough to handle the new
-        # 'subreddits' column (which is a list -> TEXT[]) automatically.
+        # --- USERS ---
         print("Processing 'users' data...")
         df_users = pd.read_json(config.USERS_JSON_PATH, orient='records')
-        df_users.to_sql("users", engine, if_exists='append', index=False)
+        
+        # This dtype mapping is correct and necessary
+        df_users.to_sql(
+            "users",
+            engine,
+            if_exists='append',
+            index=False,
+            dtype={'personas': ARRAY(String), 'subreddits': ARRAY(String)}
+        )
+        
         print(f"Successfully loaded {len(df_users)} users.")
         
-        # --- FOLLOWS (Unchanged) ---
+        # --- FOLLOWS ---
         print("Processing 'follows' data...")
         df_follows = pd.read_json(config.FOLLOWS_JSON_PATH, orient='records')
         df_follows.to_sql("follows", engine, if_exists='append', index=False)
         print(f"Successfully loaded {len(df_follows)} follows.")
         
-        # --- POSTS (Unchanged) ---
+        # --- POSTS ---
         print("Processing 'posts' data (with Pandas)...")
         df_posts = pd.read_json(config.POSTS_JSON_PATH, orient='records')
         
         cleaned_content = df_posts['content'].str.lower()
         cleaned_content = cleaned_content.str.replace(r'http\S+', '', regex=True)
-        cleaned_content = cleaned_content.str.replace(r'[^a-z0-9\s]', '', regex=True)
+        cleaned_content = cleaned_content.str.replace(r'[^a-z0_9\s]', '', regex=True)
         cleaned_content = cleaned_content.str.replace(r'\s+', ' ', regex=True)
         cleaned_content = cleaned_content.str.strip()
         cleaned_content = cleaned_content.replace('', None)
