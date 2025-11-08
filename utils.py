@@ -2,23 +2,28 @@
 
 import os
 import psycopg2
+from sqlalchemy import create_engine
 from IPython.display import clear_output
 import config
 
 
 def get_db_connection():
-    """Establishes a new connection to the PostgreSQL database."""
+    """Establishes a new (psycopg2) connection to the PostgreSQL database."""
     conn_string = f"dbname='{config.DB_NAME}' user='{config.DB_USER}' password='{config.DB_PASS}' host='{config.DB_HOST}' port='{config.DB_PORT}'"
     return psycopg2.connect(conn_string)
+
+
+def get_sqlalchemy_engine():
+    """Establishes a new (sqlalchemy) engine for pandas.to_sql()."""
+    conn_string = f"postgresql+psycopg2://{config.DB_USER}:{config.DB_PASS}@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}"
+    return create_engine(conn_string)
 
 
 def clear_screen():
     """Clears the console output."""
     try:
-        # This works in Jupyter, VSCode notebooks, and IPython consoles
         clear_output(wait=True)
     except ImportError:
-        # Fallback for standard Python terminals
         os.system('cls' if os.name == 'nt' else 'clear')
 
 
@@ -28,7 +33,6 @@ def check_file_prerequisites(stage_number):
     Returns (True, None) if successful, or (False, error_message) if not.
     """
     if stage_number == 1:
-        # Stage 1 has no file prerequisites
         return True, None
     
     if stage_number == 2:
@@ -49,6 +53,4 @@ def check_file_prerequisites(stage_number):
             return False, f"Missing files: {', '.join(missing)}. Please run Stages 1 and 2."
         return True, None
     
-    # Stages 4 & 5 depend on the database, not files.
-    # We'll check for DB tables in their own setup.
     return True, None

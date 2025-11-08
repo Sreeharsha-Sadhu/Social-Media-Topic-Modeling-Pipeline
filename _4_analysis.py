@@ -1,219 +1,178 @@
 # stage_4_analysis.py
+# (Replaces stage_4_spark_analysis.py)
+# This is a 100% Spark-free, pure Python/Pandas analysis pipeline.
 
-import psycopg2
+import torch
 import pandas as pd
-from bertopic import BERTopic
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from psycopg2.extras import execute_values
-from tqdm import tqdm
+# --- NO MORE SPARK IMPORTS ---
+from sklearn.cluster import KMeans as SklearnKMeans
+from sentence_transformers import SentenceTransformer
+from transformers import pipeline
+import os
 import sys
+from tqdm import tqdm
 import config
 import utils
 
-# SQL to create the results tables (unchanged)
-CREATE_RESULTS_TABLES_SQL = """
-                            CREATE TABLE IF NOT EXISTS user_topics \
-                            ( \
-                                topic_id   SERIAL PRIMARY KEY, \
-                                user_id    TEXT REFERENCES users (user_id) ON DELETE CASCADE, \
-                                topic_name TEXT, \
-                                summary    TEXT, \
-                                post_count INTEGER, \
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                            );
-
-                            CREATE TABLE IF NOT EXISTS post_topic_mapping \
-                            ( \
-                                post_id  TEXT REFERENCES posts (post_id) ON DELETE CASCADE, \
-                                topic_id INTEGER REFERENCES user_topics (topic_id) ON DELETE CASCADE, \
-                                PRIMARY KEY (post_id, topic_id)
-                            ); \
-                            """
+# --- 1. Global Caching for Summarizer (Unchanged) ---
+model_cache = {}
 
 
-def create_results_tables():
-    """Creates the result/analysis DB tables if they don't exist."""
-    print("--- Stage 4.A: Creating Results Tables ---")
+def get_summarizer_pipeline():
+    """
+    Loads and caches the BART summarization pipeline.
+    Uses GPU (device=0) and FP16 (float16) for optimization.
+    """
+    if "summarizer" not in model_cache:
+        print("--- Caching: Loading BART summarization model (distilbart-cnn-12-6) to GPU with FP16 ---")
+        
+        if not torch.cuda.is_available():
+            print("--- WARNING: CUDA not available. Loading model on CPU. This will be very slow. ---")
+            model_cache["summarizer"] = pipeline(
+                "summarization",
+                model="sshleifer/distilbart-cnn-12-6"
+            )
+        else:
+            model_cache["summarizer"] = pipeline(
+                "summarization",
+                model="sshleifer/distilbart-cnn-12-6",
+                device=0,
+                torch_dtype=torch.float16
+            )
+    return model_cache["summarizer"]
+
+
+# --- 2. Main Analysis Function (Pure Pandas) ---
+def run_global_analysis():
+    """
+    Runs the entire pipeline.
+    Uses Pandas/SQLAlchemy to load/save and Pandas/SKlearn for all AI.
+    """
+    print("--- Starting Stage 4: Global Analysis (Pure Pandas/SKlearn) ---")
+    
+    try:
+        engine = utils.get_sqlalchemy_engine()
+    except Exception as e:
+        print("--- 🚨 FATAL ERROR: Could not create SQLAlchemy engine ---")
+        print(f"Error: {e}")
+        return False
+    
+    try:
+        # --- Load Data from Postgres ---
+        print("Loading all posts from PostgreSQL into Pandas...")
+        sql_query = "SELECT post_id, cleaned_content FROM posts WHERE cleaned_content IS NOT NULL AND cleaned_content != ''"
+        pd_posts = pd.read_sql(sql_query, engine)
+        
+        if len(pd_posts) < 20:  # Need a minimum for clustering
+            print(f"Not enough posts ({len(pd_posts)}) to analyze. Aborting.")
+            return False
+        
+        print(f"Loaded {len(pd_posts)} posts.")
+        
+        # --- Step 2: Embedding (in-driver) ---
+        print("Loading sentence-transformer model (in-driver)...")
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        sbert_model = SentenceTransformer('all-MiniLM-L6-v2', device=device)
+        
+        print("Generating embeddings (in-driver)...")
+        embeddings = sbert_model.encode(
+            pd_posts['cleaned_content'].tolist(),
+            batch_size=16,
+            show_progress_bar=True
+        )
+        
+        # --- Step 3: Clustering (in-driver with scikit-learn) ---
+        NUM_TOPICS = 20
+        print(f"Clustering posts into {NUM_TOPICS} topics with scikit-learn K-Means...")
+        kmeans = SklearnKMeans(n_clusters=NUM_TOPICS, random_state=0, n_init=10)
+        pd_posts['topic_id'] = kmeans.fit_predict(embeddings)
+        
+        # --- Step 4: Summarization (in-driver) ---
+        print("Summarizing topics (in-driver)...")
+        summarizer = get_summarizer_pipeline()
+        
+        topic_summaries = []
+        
+        for topic_id, group_df in tqdm(pd_posts.groupby('topic_id'), total=NUM_TOPICS):
+            full_text = " . ".join(group_df['cleaned_content'].tolist())
+            truncated_text = full_text[:4500]
+            
+            try:
+                summary = summarizer(truncated_text, max_length=150, min_length=30, do_sample=False)[0]['summary_text']
+            except Exception as e:
+                print(f"Error summarizing topic {topic_id}: {e}")
+                summary = f"Error generating summary: {e}"
+            
+            topic_summaries.append((int(topic_id), summary))
+        
+        pd_summaries = pd.DataFrame(topic_summaries, columns=["topic_id", "summary_text"])
+        pd_mappings = pd_posts[['post_id', 'topic_id']]
+        
+        # --- Step 5: Save Results Back to DB ---
+        print("Analysis complete. Saving results to PostgreSQL...")
+        
+        with utils.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                print("Truncating old analysis results...")
+                cur.execute("TRUNCATE TABLE global_topics, post_topic_mapping RESTART IDENTITY CASCADE;")
+                conn.commit()
+        
+        # Save new results using Pandas to_sql
+        pd_summaries.to_sql("global_topics", engine, if_exists='append', index=False)
+        pd_mappings.to_sql("post_topic_mapping", engine, if_exists='append', index=False)
+        
+        print("Successfully saved global topics and post mappings.")
+        
+        print("\n--- Final Topic Summaries ---")
+        print(pd_summaries.sort_values(by='topic_id').to_string())
+        return True
+    
+    except Exception as e:
+        print(f"\n--- 🚨 ERROR during Pandas AI Analysis ---")
+        print(f"Error details: {e}")
+        return False
+    finally:
+        if 'engine' in locals():
+            engine.dispose()
+        print("Analysis process finished.")
+
+
+# --- Database Setup Function (Rewritten to be standalone) ---
+def setup_database_tables():
+    """
+    Creates/Re-creates the tables for this new analysis pipeline.
+    """
+    print("Setting up database tables for global analysis...")
+    
+    CREATE_GLOBAL_TOPICS_SQL = """
+                               DROP TABLE IF EXISTS post_topic_mapping CASCADE;
+                               DROP TABLE IF EXISTS user_topics CASCADE;
+                               DROP TABLE IF EXISTS global_topics CASCADE;
+
+                               CREATE TABLE global_topics \
+                               ( \
+                                   topic_id     INTEGER PRIMARY KEY, \
+                                   summary_text TEXT
+                               );
+
+                               CREATE TABLE post_topic_mapping \
+                               ( \
+                                   post_id  TEXT REFERENCES posts (post_id) ON DELETE CASCADE, \
+                                   topic_id INTEGER REFERENCES global_topics (topic_id) ON DELETE CASCADE, \
+                                   PRIMARY KEY (post_id, topic_id)
+                               ); \
+                               """
     try:
         with utils.get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(CREATE_RESULTS_TABLES_SQL)
+                cur.execute(CREATE_GLOBAL_TOPICS_SQL)
                 conn.commit()
-        print("Successfully created 'user_topics' and 'post_topic_mapping' tables.")
+        print("Successfully dropped old tables and created 'global_topics' and 'post_topic_mapping' tables.")
     except Exception as e:
-        print(f"--- 🚨 ERROR: Could not create results tables ---")
+        print(f"--- 🚨 ERROR: Could not set up database tables ---")
         print(f"Error details: {e}")
-
-
-def clear_previous_analysis(conn, user_id):
-    """Clears out old analysis results for a user."""
-    print(f"Cleared old analysis results for {user_id}.")
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM user_topics WHERE user_id = %s", (user_id,))
-        conn.commit()
-
-
-def get_feed_for_user(conn, user_id):
-    """Fetches the unique feed for a given user."""
-    print(f"Fetching feed for {user_id}...")
-    sql_query = """
-                SELECT p.post_id, p.cleaned_content
-                FROM posts p
-                         JOIN follows f ON p.author_id = f.followed_id
-                WHERE f.follower_id = %s
-                  AND p.cleaned_content IS NOT NULL
-                  AND p.cleaned_content != ''; \
-                """
-    with conn.cursor() as cur:
-        cur.execute(sql_query, (user_id,))
-        rows = cur.fetchall()
-    
-    df = pd.DataFrame(rows, columns=['post_id', 'cleaned_content'])
-    
-    if df.empty:
-        print(f"No posts found for {user_id}'s feed.")
-        return None
-    
-    print(f"Found {len(df)} posts in {user_id}'s feed.")
-    return df
-
-
-# --- 3. AI Core (Topic Modeling & Summarization) ---
-def run_analysis_pipeline(user_id):
-    """
-    Main function to run the full AI analysis pipeline for a user.
-    """
-    conn = None
-    try:
-        conn = utils.get_db_connection()
-    except Exception as e:
-        print("--- 🚨 ERROR: Could not connect to database. ---")
-        print("Please ensure PostgreSQL is running and config.py is correct.")
-        print(f"Error details: {e}")
-        return False
-    
-    try:
-        clear_previous_analysis(conn, user_id)
-        
-        feed_df = get_feed_for_user(conn, user_id)
-        if feed_df is None or len(feed_df) < 10:
-            print(f"Not enough posts ({0 if feed_df is None else len(feed_df)}) to analyze. Aborting.")
-            return True
-        
-        posts_list = feed_df['cleaned_content'].tolist()
-        
-        print("Initializing BERTopic model...")
-        topic_model = BERTopic(
-            embedding_model="all-MiniLM-L6-v2",
-            min_topic_size=5,
-            verbose=False
-        )
-        
-        print("Initializing FLAN-T5 model (this may take a few minutes on first run)...")
-        model_name = "google/flan-t5-base"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        
-        print("Running BERTopic. This may take a few minutes...")
-        topics, _ = topic_model.fit_transform(posts_list)
-        feed_df['topic'] = topics
-        topic_info_df = topic_model.get_topic_info()
-        print(f"BERTopic found {len(topic_info_df) - 1} topics.")
-        
-        print("Generating summaries and titles for each topic...")
-        all_post_topic_mappings = []
-        
-        for _, topic_row in tqdm(topic_info_df.iterrows(), total=topic_info_df.shape[0]):
-            topic_num = topic_row['Topic']
-            
-            if topic_num == -1:
-                continue
-            
-            topic_posts_df = feed_df[feed_df['topic'] == topic_num]
-            topic_posts = topic_posts_df['cleaned_content'].tolist()
-            post_count = len(topic_posts)
-            
-            doc_to_summarize = " . ".join(topic_posts)
-            
-            # --- MODIFIED SECTION: Two-Pass Generation ---
-            
-            # --- 1. Create the Summary (with new settings) ---
-            summary_prompt = f"""
-Read the following social media posts:
----
-{doc_to_summarize[:4000]}
----
-Write a single, coherent paragraph that summarizes the main topic being discussed.
-SUMMARY:
-"""
-            input_ids = tokenizer(summary_prompt, return_tensors="pt", truncation=True, max_length=1024).input_ids
-            # INCREASED max_length to 150 and min_length to 30 to allow for fuller sentences
-            outputs = model.generate(input_ids, max_length=150, min_length=30, num_beams=4, no_repeat_ngram_size=2)
-            summary_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            # --- 2. Create the Title (with new prompt and settings) ---
-            # IMPROVED prompt to ask for a "human-readable" title
-            title_prompt = f"""
-Based on the following summary, what is a short, human-readable topic title?
----
-{summary_text}
----
-A descriptive 3-to-5 word title is:
-"""
-            input_ids = tokenizer(title_prompt, return_tensors="pt", truncation=True, max_length=256).input_ids
-            # INCREASED max_length to 30 to give it more room for a natural title
-            outputs = model.generate(input_ids, max_length=30, min_length=3, num_beams=2)
-            topic_name = tokenizer.decode(outputs[0], skip_special_tokens=True).replace("TITLE:", "").strip()
-            
-            # --- END MODIFIED SECTION ---
-            
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO user_topics (user_id, topic_name, summary, post_count)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING topic_id;
-                    """,
-                    (user_id, topic_name, summary_text, post_count)
-                )
-                new_topic_id = cur.fetchone()[0]
-                conn.commit()
-            
-            for post_id in topic_posts_df['post_id'].tolist():
-                all_post_topic_mappings.append((post_id, new_topic_id))
-        
-        if all_post_topic_mappings:
-            print(f"Saving {len(all_post_topic_mappings)} post-topic mappings...")
-            with conn.cursor() as cur:
-                execute_values(
-                    cur,
-                    "INSERT INTO post_topic_mapping (post_id, topic_id) VALUES %s",
-                    all_post_topic_mappings
-                )
-                conn.commit()
-        
-        print("\n--- Stage 4: Analysis Complete! ---")
-        print(f"Successfully analyzed and saved results for {user_id}.")
-        return True
-    
-    except (Exception, psycopg2.Error) as error:
-        print(f"--- 🚨 ERROR in Stage 4 ---")
-        print(f"Error details: {error}")
-        if conn:
-            conn.rollback()
-        return False
-    
-    finally:
-        if conn:
-            conn.close()
-            print("Database connection closed.")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        user_id_to_run = sys.argv[1]
-        create_results_tables()
-        run_analysis_pipeline(user_id_to_run)
-    else:
-        print("Usage: python stage_4_analysis.py <user_id>")
-        print("Example: python stage_4_analysis.py user_1")
+    setup_database_tables()
+    run_global_analysis()

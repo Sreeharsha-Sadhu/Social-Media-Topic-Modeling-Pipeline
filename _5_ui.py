@@ -1,7 +1,9 @@
 # stage_5_ui_helpers.py
+# (No changes to list_all_users function)
 
 import pandas as pd
 import utils
+
 
 def list_all_users():
     """Fetches and displays all users from the database."""
@@ -10,7 +12,6 @@ def list_all_users():
     try:
         conn = utils.get_db_connection()
         df = pd.read_sql("SELECT user_id, username, personas FROM users ORDER BY user_id", conn)
-        # Use print(df.to_string()) for a standard console.
         print(df.to_string())
     except Exception as e:
         print(f"🚨 Error listing users: {e}")
@@ -19,41 +20,40 @@ def list_all_users():
         if conn:
             conn.close()
 
-def view_results_for_user(user_id):
-    """Fetches and displays the last analysis results for a user."""
-    print(f"\n--- 📈 Viewing Analysis for: {user_id} ---")
+
+# --- MODIFIED FUNCTION ---
+def view_global_topics():
+    """
+    Fetches and displays the globally generated topics and their summaries.
+    """
+    print(f"\n--- 📈 Viewing Global Topic Summaries ---")
     conn = None
     try:
         conn = utils.get_db_connection()
-        with conn.cursor() as cur:
-            cur.execute(
+        
+        # New query to join global_topics with post_topic_mapping to get counts
+        query = """
+                SELECT gt.topic_id, \
+                       gt.summary_text, \
+                       COUNT(ptm.post_id) AS post_count
+                FROM global_topics gt
+                         LEFT JOIN post_topic_mapping ptm ON gt.topic_id = ptm.topic_id
+                GROUP BY gt.topic_id, gt.summary_text
+                ORDER BY post_count DESC; \
                 """
-                SELECT topic_name, summary, post_count
-                FROM user_topics
-                WHERE user_id = %s
-                ORDER BY post_count DESC
-                """,
-                (user_id,)
-            )
-            results = cur.fetchall()
-
-            if not results:
-                print(f"No results found for {user_id}.")
-                print("Please run an analysis (Option 5) for this user first.")
-                return
-
-            for i, (topic_name, summary, post_count) in enumerate(results):
-                print("\n" + "=" * 40)
-                # --- THIS IS THE FIXED LINE ---
-                # We no longer need to split the name, as it's already a clean title.
-                print(f"   TOPIC: {topic_name}")
-                # --- END OF FIX ---
-                print(f"   POSTS: {post_count}")
-                print(f"   SUMMARY: {summary}")
-            print("=" * 40)
-
+        df = pd.read_sql(query, conn)
+        
+        if df.empty:
+            print("No results found. Please run 'Stage 4: Generate Global Topic Model' first.")
+            return
+        
+        for index, row in df.iterrows():
+            print("\n" + "=" * 40)
+            print(f"   TOPIC ID: {row['topic_id']} (Posts: {row['post_count']})")
+            print(f"   SUMMARY: {row['summary_text']}")
+        print("=" * 40)
+    
     except Exception as e:
-        # This will now print the actual error if something else goes wrong
         print(f"🚨 Error viewing results: {e}")
     finally:
         if conn:
