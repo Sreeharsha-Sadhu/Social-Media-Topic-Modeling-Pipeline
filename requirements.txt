@@ -1,19 +1,24 @@
-rich
-click
-networkx
-psycopg2-binary
-pandas
-tqdm
-pyspark
-bertopic
-transformers
-ipython
-praw
-scikit-learn
-sentence-transformers
-SQLAlchemy
+# Core
 python-dotenv
-nest-asyncio
-pyppeteer
-requests-html
+pandas
 numpy
+sqlalchemy
+psycopg2-binary
+tqdm
+networkx
+
+# Spark (optional if USE_SPARK_ETL=true)
+pyspark>=3.5.0
+
+# ML / AI
+sentence-transformers
+scikit-learn
+transformers
+torch
+
+# UI / CLI
+click
+rich
+
+# Optional (future: Streamlit dashboard)
+streamlit
