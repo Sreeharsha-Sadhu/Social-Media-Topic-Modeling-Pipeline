@@ -1,7 +1,7 @@
 # stage_5_ui_helpers.py
 
 import pandas as pd
-import utils
+from src.common import utils
 
 
 def list_all_users():

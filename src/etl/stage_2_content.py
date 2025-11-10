@@ -1,14 +1,13 @@
 # stage_2_content.py
 
 import json
-import os
 import random
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import networkx as nx
 from tqdm import tqdm
-import config  # Import our config
-from utils import check_file_prerequisites  # Import the checker
+from src.config import settings
+from src.common.utils import check_file_prerequisites
 
 # --- Configuration ---
 AVG_POSTS_PER_USER = 40
@@ -122,7 +121,7 @@ TOPIC_FILLERS = {
 
 
 def get_random_timestamp():
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     delta = timedelta(days=random.randint(0, 30),
                       hours=random.randint(0, 23),
                       minutes=random.randint(0, 59))
@@ -150,8 +149,8 @@ def main():
         return
     
     # Load users from Stage 1
-    print(f"Loading users from '{config.USERS_JSON_PATH}'...")
-    with open(config.USERS_JSON_PATH, 'r') as f:
+    print(f"Loading users from '{settings.USERS_JSON_PATH}'...")
+    with open(settings.USERS_JSON_PATH, 'r') as f:
         users = json.load(f)
     
     # Generate "Original Posts"
@@ -171,26 +170,26 @@ def main():
             })
     
     # Save Posts to JSON
-    print(f"\nSaving {len(all_posts)} posts to '{config.POSTS_JSON_PATH}'...")
-    with open(config.POSTS_JSON_PATH, "w") as f:
+    print(f"\nSaving {len(all_posts)} posts to '{settings.POSTS_JSON_PATH}'...")
+    with open(settings.POSTS_JSON_PATH, "w") as f:
         json.dump(all_posts, f, indent=2)
     
     # Convert 'follows.edgelist' to 'follows.json'
-    print(f"Converting '{config.EDGELIST_PATH}' to '{config.FOLLOWS_JSON_PATH}'...")
+    print(f"Converting '{settings.EDGELIST_PATH}' to '{settings.FOLLOWS_JSON_PATH}'...")
     try:
-        G = nx.read_edgelist(config.EDGELIST_PATH, create_using=nx.DiGraph())
+        G = nx.read_edgelist(settings.EDGELIST_PATH, create_using=nx.DiGraph())
         follows_list = []
         for follower, followed in G.edges():
             follows_list.append({
                 "follower_id": follower,
                 "followed_id": followed
             })
-        with open(config.FOLLOWS_JSON_PATH, "w") as f:
+        with open(settings.FOLLOWS_JSON_PATH, "w") as f:
             json.dump(follows_list, f, indent=2)
         print(f"Successfully converted {len(follows_list)} follow relationships.")
     
     except FileNotFoundError:
-        print(f"ERROR: '{config.EDGELIST_PATH}' not found. Did Stage 1 run correctly?")
+        print(f"ERROR: '{settings.EDGELIST_PATH}' not found. Did Stage 1 run correctly?")
     
     print("\n--- Stage 2 Complete ---")
 

@@ -1,16 +1,12 @@
 # main.py
 
 import sys
-import getpass  # <-- ADDED for securely getting passwords
-import utils
-import stage_1_generation
-import stage_2_content
-import stage_3_etl
-import stage_4_analysis
-import stage_5_ui_helpers
+from src.common import utils
+from src.etl import stage_3_etl, stage_1_generation, stage_2_content
+from src.analysis import stage_4_analysis
+from src.ui import stage_5_ui_helpers
 # --- MODIFIED IMPORTS ---
-import live_analyzer
-from live_analyzer import (
+from src.analysis.live_analyzer import (
     analyze_reddit_feed,
     analyze_linkedin_feed,
     analyze_twitter_feed

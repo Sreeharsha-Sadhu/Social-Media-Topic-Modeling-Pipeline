@@ -5,7 +5,7 @@ import networkx as nx
 import random
 import json
 import os
-import config
+from src.config import settings
 
 # --- Configuration ---
 NUM_USERS = 25
@@ -97,15 +97,15 @@ def main():
     print(f"Total users created: {len(users)}")
     print(f"Social Graph: {social_graph.number_of_nodes()} nodes, {social_graph.number_of_edges()} edges.")
     
-    os.makedirs(config.DATA_DIR, exist_ok=True)
+    os.makedirs(settings.DATA_DIR, exist_ok=True)
     
-    with open(config.USERS_JSON_PATH, "w") as f:
+    with open(settings.USERS_JSON_PATH, "w") as f:
         json.dump(users, f, indent=2)
     
-    nx.write_edgelist(social_graph, config.EDGELIST_PATH)
+    nx.write_edgelist(social_graph, settings.EDGELIST_PATH)
     
-    print(f"\nUsers list saved to '{config.USERS_JSON_PATH}'")
-    print(f"Social graph saved to '{config.EDGELIST_PATH}'")
+    print(f"\nUsers list saved to '{settings.USERS_JSON_PATH}'")
+    print(f"Social graph saved to '{settings.EDGELIST_PATH}'")
 
 
 if __name__ == "__main__":

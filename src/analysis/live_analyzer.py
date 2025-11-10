@@ -3,13 +3,11 @@
 import pandas as pd
 from sklearn.cluster import KMeans as SklearnKMeans
 from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
 import torch
 import asyncio
 
-import utils
-import config
-import text_extractor
+from src.common import utils
+from src.etl import text_extractor
 from stage_4_analysis import get_llm_pipeline  # Reuse our LLM
 import live_linkedin  # <-- ADDED
 import live_twitter  # <-- ADDED

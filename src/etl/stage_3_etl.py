@@ -14,11 +14,10 @@ Make sure you've added these lines to your .env or environment:
 
 import psycopg2
 import pandas as pd
-import re
-import config
-import utils
+
+from src.config import settings
+from src.common import utils
 from sqlalchemy.types import ARRAY, String
-from sqlalchemy.exc import SQLAlchemyError
 
 # --- Existing SQL (unchanged) ---
 CREATE_TABLES_SQL = """
@@ -88,11 +87,11 @@ def _init_spark():
     # Try to import pyspark and create a session locally
     try:
         from pyspark.sql import SparkSession
-        print(f"🧩 Initializing SparkSession ({config.SPARK_APP_NAME}) master={config.SPARK_MASTER} ...")
+        print(f"🧩 Initializing SparkSession ({settings.SPARK_APP_NAME}) master={settings.SPARK_MASTER} ...")
         spark = (
             SparkSession.builder
-            .appName(config.SPARK_APP_NAME if hasattr(config, "SPARK_APP_NAME") else "SocialMediaETL")
-            .master(config.SPARK_MASTER if hasattr(config, "SPARK_MASTER") else "local[*]")
+            .appName(settings.SPARK_APP_NAME if hasattr(settings, "SPARK_APP_NAME") else "SocialMediaETL")
+            .master(settings.SPARK_MASTER if hasattr(settings, "SPARK_MASTER") else "local[*]")
             .config("spark.sql.execution.arrow.pyspark.enabled", "true")
             .config("spark.sql.repl.eagerEval.enabled", "true")
             .getOrCreate()
@@ -113,7 +112,7 @@ def _run_etl_pandas():
 
         # --- USERS ---
         print("Processing 'users' data...")
-        df_users = pd.read_json(config.USERS_JSON_PATH, orient='records')
+        df_users = pd.read_json(settings.USERS_JSON_PATH, orient='records')
 
         df_users.to_sql(
             "users",
@@ -126,13 +125,13 @@ def _run_etl_pandas():
 
         # --- FOLLOWS ---
         print("Processing 'follows' data...")
-        df_follows = pd.read_json(config.FOLLOWS_JSON_PATH, orient='records')
+        df_follows = pd.read_json(settings.FOLLOWS_JSON_PATH, orient='records')
         df_follows.to_sql("follows", engine, if_exists='append', index=False)
         print(f"Successfully loaded {len(df_follows)} follows.")
 
         # --- POSTS ---
         print("Processing 'posts' data (with Pandas)...")
-        df_posts = pd.read_json(config.POSTS_JSON_PATH, orient='records')
+        df_posts = pd.read_json(settings.POSTS_JSON_PATH, orient='records')
 
         # Cleaning (original Pandas code)
         cleaned_content = df_posts['content'].str.lower()
@@ -183,18 +182,18 @@ def _run_etl_spark():
 
         from pyspark.sql import functions as F
 
-        jdbc_url = f"jdbc:postgresql://{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}"
+        jdbc_url = f"jdbc:postgresql://{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
         jdbc_opts = {
             "url": jdbc_url,
-            "user": config.DB_USER,
-            "password": config.DB_PASS,
+            "user": settings.DB_USER,
+            "password": settings.DB_PASS,
             "driver": "org.postgresql.Driver"
         }
 
         # --- USERS ---
         print("Reading users.json via Spark...")
         try:
-            df_users = spark.read.option("multiLine", "true").json(config.USERS_JSON_PATH)
+            df_users = spark.read.option("multiLine", "true").json(settings.USERS_JSON_PATH)
         except Exception as e:
             print(f"🚨 Failed to read users JSON with Spark: {e}")
             raise
@@ -213,7 +212,7 @@ def _run_etl_spark():
 
         # --- FOLLOWS ---
         print("Reading follows.json via Spark...")
-        df_follows = spark.read.option("multiLine", "true").json(config.FOLLOWS_JSON_PATH)
+        df_follows = spark.read.option("multiLine", "true").json(settings.FOLLOWS_JSON_PATH)
 
         print("Writing 'follows' table to PostgreSQL via JDBC (append)...")
         (df_follows.write
@@ -229,7 +228,7 @@ def _run_etl_spark():
 
         # --- POSTS ---
         print("Reading posts.json via Spark...")
-        df_posts = spark.read.option("multiLine", "true").json(config.POSTS_JSON_PATH)
+        df_posts = spark.read.option("multiLine", "true").json(settings.POSTS_JSON_PATH)
 
         print("Cleaning post text content (Spark native functions, no UDFs)...")
         df_posts = df_posts.withColumn("cleaned_content", F.lower(F.col("content")))
@@ -302,7 +301,7 @@ def create_tables():
 def run_etl():
     """Runs the full ETL pipeline: Truncate and then run selected (Spark/Pandas) implementation."""
     print("\n--- Starting Stage 3.B: ETL ---")
-    mode = "Spark" if getattr(config, "USE_SPARK_ETL", False) else "Pandas"
+    mode = "Spark" if getattr(settings, "USE_SPARK_ETL", False) else "Pandas"
     print(f"ETL Mode: {mode}")
 
     success, msg = utils.check_file_prerequisites(3)
@@ -328,7 +327,7 @@ def run_etl():
         return False
 
     # Route to Spark or Pandas path
-    if getattr(config, "USE_SPARK_ETL", False):
+    if getattr(settings, "USE_SPARK_ETL", False):
         return _run_etl_spark()
     else:
         return _run_etl_pandas()

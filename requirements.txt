@@ -1,31 +1,17 @@
-# requirements.txt
-streamlit
-python-dotenv
-
-# Core Pipeline
-pandas
-sqlalchemy
-psycopg2-binary
-scikit-learn
-numpy
-
-# AI & ML
-transformers
-torch
-torchvision
-torchaudio
-sentence-transformers
-sentencepiece
-
-# Data Generation
 networkx
+psycopg2-binary
+pandas
 tqdm
-
-# Scraping
+pyspark
+bertopic
+transformers
+ipython
 praw
-requests-html
-pyppeteer
+scikit-learn
+sentence-transformers
+SQLAlchemy
+python-dotenv
 nest-asyncio
-
-# Spark Demo (Optional)
-# (Install with: pip install pyspark)
+pyppeteer
+requests-html
+numpy

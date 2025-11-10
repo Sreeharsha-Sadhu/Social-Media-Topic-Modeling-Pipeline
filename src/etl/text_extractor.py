@@ -2,7 +2,6 @@
 
 import praw
 from requests_html import HTMLSession
-import config
 
 # --- Setup for general web scraping ---
 session = HTMLSession()
