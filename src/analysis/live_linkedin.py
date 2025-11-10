@@ -1,8 +1,9 @@
 # live_linkedin.py
 
 import asyncio
-from pyppeteer import launch
 import re
+
+from pyppeteer import launch
 
 MIN_POST_REQ = 50
 

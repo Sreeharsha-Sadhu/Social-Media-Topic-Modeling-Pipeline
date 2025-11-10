@@ -12,12 +12,12 @@ Make sure you've added these lines to your .env or environment:
     SPARK_APP_NAME=SocialMediaETL
 """
 
-import psycopg2
 import pandas as pd
-
-from src.config import settings
-from src.common import utils
+import psycopg2
 from sqlalchemy.types import ARRAY, String
+
+from src.common import utils
+from src.config import settings
 
 # --- Existing SQL (unchanged) ---
 CREATE_TABLES_SQL = """
@@ -66,6 +66,7 @@ TRUNCATE_STAGE3_SQL = """
                           RESTART IDENTITY CASCADE; \
                       """
 
+
 # -------------------------
 # Helper: Spark initialization (tries utils.get_spark_session if present)
 # -------------------------
@@ -83,7 +84,7 @@ def _init_spark():
     except Exception:
         # Fall through to local creation
         pass
-
+    
     # Try to import pyspark and create a session locally
     try:
         from pyspark.sql import SparkSession
@@ -109,11 +110,11 @@ def _run_etl_pandas():
     print("--- Running Pandas ETL ---")
     try:
         engine = utils.get_sqlalchemy_engine()
-
+        
         # --- USERS ---
         print("Processing 'users' data...")
         df_users = pd.read_json(settings.USERS_JSON_PATH, orient='records')
-
+        
         df_users.to_sql(
             "users",
             engine,
@@ -122,17 +123,17 @@ def _run_etl_pandas():
             dtype={'personas': ARRAY(String), 'subreddits': ARRAY(String)}
         )
         print(f"Successfully loaded {len(df_users)} users.")
-
+        
         # --- FOLLOWS ---
         print("Processing 'follows' data...")
         df_follows = pd.read_json(settings.FOLLOWS_JSON_PATH, orient='records')
         df_follows.to_sql("follows", engine, if_exists='append', index=False)
         print(f"Successfully loaded {len(df_follows)} follows.")
-
+        
         # --- POSTS ---
         print("Processing 'posts' data (with Pandas)...")
         df_posts = pd.read_json(settings.POSTS_JSON_PATH, orient='records')
-
+        
         # Cleaning (original Pandas code)
         cleaned_content = df_posts['content'].str.lower()
         cleaned_content = cleaned_content.str.replace(r'http\S+', '', regex=True)
@@ -140,16 +141,16 @@ def _run_etl_pandas():
         cleaned_content = cleaned_content.str.replace(r'\s+', ' ', regex=True)
         cleaned_content = cleaned_content.str.strip()
         cleaned_content = cleaned_content.replace('', None)
-
+        
         df_posts['cleaned_content'] = cleaned_content
         df_posts['created_at'] = pd.to_datetime(df_posts['created_at'])
-
+        
         df_posts.to_sql("posts", engine, if_exists='append', index=False)
         print(f"Successfully loaded {len(df_posts)} posts.")
-
+        
         print("\n--- Pandas ETL Job Complete! ---")
         return True
-
+    
     except Exception as e:
         print(f"\n--- 🚨 ERROR during Pandas ETL ---")
         print(f"Error details: {e}")
@@ -179,9 +180,9 @@ def _run_etl_spark():
             print(f"🚨 Spark initialization failed: {e}")
             print("Falling back to Pandas ETL.")
             return _run_etl_pandas()
-
+        
         from pyspark.sql import functions as F
-
+        
         jdbc_url = f"jdbc:postgresql://{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
         jdbc_opts = {
             "url": jdbc_url,
@@ -189,7 +190,7 @@ def _run_etl_spark():
             "password": settings.DB_PASS,
             "driver": "org.postgresql.Driver"
         }
-
+        
         # --- USERS ---
         print("Reading users.json via Spark...")
         try:
@@ -197,39 +198,39 @@ def _run_etl_spark():
         except Exception as e:
             print(f"🚨 Failed to read users JSON with Spark: {e}")
             raise
-
+        
         print("Writing 'users' table to PostgreSQL via JDBC (append)...")
         (df_users.write
-            .format("jdbc")
-            .option("url", jdbc_opts["url"])
-            .option("dbtable", "users")
-            .option("user", jdbc_opts["user"])
-            .option("password", jdbc_opts["password"])
-            .option("driver", jdbc_opts["driver"])
-            .mode("append")
-            .save()
-        )
-
+         .format("jdbc")
+         .option("url", jdbc_opts["url"])
+         .option("dbtable", "users")
+         .option("user", jdbc_opts["user"])
+         .option("password", jdbc_opts["password"])
+         .option("driver", jdbc_opts["driver"])
+         .mode("append")
+         .save()
+         )
+        
         # --- FOLLOWS ---
         print("Reading follows.json via Spark...")
         df_follows = spark.read.option("multiLine", "true").json(settings.FOLLOWS_JSON_PATH)
-
+        
         print("Writing 'follows' table to PostgreSQL via JDBC (append)...")
         (df_follows.write
-            .format("jdbc")
-            .option("url", jdbc_opts["url"])
-            .option("dbtable", "follows")
-            .option("user", jdbc_opts["user"])
-            .option("password", jdbc_opts["password"])
-            .option("driver", jdbc_opts["driver"])
-            .mode("append")
-            .save()
-        )
-
+         .format("jdbc")
+         .option("url", jdbc_opts["url"])
+         .option("dbtable", "follows")
+         .option("user", jdbc_opts["user"])
+         .option("password", jdbc_opts["password"])
+         .option("driver", jdbc_opts["driver"])
+         .mode("append")
+         .save()
+         )
+        
         # --- POSTS ---
         print("Reading posts.json via Spark...")
         df_posts = spark.read.option("multiLine", "true").json(settings.POSTS_JSON_PATH)
-
+        
         print("Cleaning post text content (Spark native functions, no UDFs)...")
         df_posts = df_posts.withColumn("cleaned_content", F.lower(F.col("content")))
         df_posts = df_posts.withColumn("cleaned_content", F.regexp_replace("cleaned_content", r"http\S+", ""))
@@ -239,22 +240,22 @@ def _run_etl_spark():
         df_posts = df_posts.withColumn("cleaned_content", F.trim(F.col("cleaned_content")))
         # Convert created_at to timestamp (assuming ISO-like strings)
         df_posts = df_posts.withColumn("created_at", F.to_timestamp("created_at"))
-
+        
         print("Writing 'posts' table to PostgreSQL via JDBC (append)...")
         (df_posts.write
-            .format("jdbc")
-            .option("url", jdbc_opts["url"])
-            .option("dbtable", "posts")
-            .option("user", jdbc_opts["user"])
-            .option("password", jdbc_opts["password"])
-            .option("driver", jdbc_opts["driver"])
-            .mode("append")
-            .save()
-        )
-
+         .format("jdbc")
+         .option("url", jdbc_opts["url"])
+         .option("dbtable", "posts")
+         .option("user", jdbc_opts["user"])
+         .option("password", jdbc_opts["password"])
+         .option("driver", jdbc_opts["driver"])
+         .mode("append")
+         .save()
+         )
+        
         print("\n✅ Spark ETL Complete!")
         return True
-
+    
     except Exception as e:
         print(f"\n--- 🚨 Spark ETL Error ---\nError details: {e}")
         print("Falling back to Pandas ETL as a safety measure.")
@@ -303,12 +304,12 @@ def run_etl():
     print("\n--- Starting Stage 3.B: ETL ---")
     mode = "Spark" if getattr(settings, "USE_SPARK_ETL", False) else "Pandas"
     print(f"ETL Mode: {mode}")
-
+    
     success, msg = utils.check_file_prerequisites(3)
     if not success:
         print(f"🚨 ERROR: {msg}")
         return False
-
+    
     print("Stage 3.B.1: Truncating old data...")
     try:
         with utils.get_db_connection() as conn:
@@ -325,7 +326,7 @@ def run_etl():
         print(f"--- 🚨 ERROR: Could not truncate tables ---")
         print(f"Error details: {e}")
         return False
-
+    
     # Route to Spark or Pandas path
     if getattr(settings, "USE_SPARK_ETL", False):
         return _run_etl_spark()

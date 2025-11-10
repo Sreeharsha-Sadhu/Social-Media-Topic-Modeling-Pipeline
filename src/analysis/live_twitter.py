@@ -1,10 +1,9 @@
 # live_twitter.py
 
 import asyncio
-import os
-import re
-from pyppeteer import launch
+
 import nest_asyncio
+from pyppeteer import launch
 
 # Allow nested event loops
 nest_asyncio.apply()

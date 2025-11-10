@@ -1,9 +1,10 @@
 # utils.py
 
 import os
-from dotenv import load_dotenv
+
 import psycopg2
 from IPython.display import clear_output
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 
 _spark_session = None

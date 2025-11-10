@@ -4,10 +4,12 @@ import json
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
+
 import networkx as nx
 from tqdm import tqdm
-from src.config import settings
+
 from src.common.utils import check_file_prerequisites
+from src.config import settings
 
 # --- Configuration ---
 AVG_POSTS_PER_USER = 40

@@ -1,16 +1,17 @@
 # live_analyzer.py
 
-import pandas as pd
-from sklearn.cluster import KMeans as SklearnKMeans
-from sentence_transformers import SentenceTransformer
-import torch
 import asyncio
 
+import pandas as pd
+import torch
+from sentence_transformers import SentenceTransformer
+from sklearn.cluster import KMeans as SklearnKMeans
+
+from src.analysis import live_linkedin  # <-- ADDED
+from src.analysis import live_twitter  # <-- ADDED
+from src.analysis.stage_4_analysis import get_llm_pipeline  # Reuse our LLM
 from src.common import utils
 from src.etl import text_extractor
-from stage_4_analysis import get_llm_pipeline  # Reuse our LLM
-import live_linkedin  # <-- ADDED
-import live_twitter  # <-- ADDED
 
 
 def get_user_subreddits(user_id):

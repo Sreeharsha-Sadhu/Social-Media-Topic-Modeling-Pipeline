@@ -1,10 +1,12 @@
 # stage_1_generation.py
 # (Only showing modified sections)
 
-import networkx as nx
-import random
 import json
 import os
+import random
+
+import networkx as nx
+
 from src.config import settings
 
 # --- Configuration ---

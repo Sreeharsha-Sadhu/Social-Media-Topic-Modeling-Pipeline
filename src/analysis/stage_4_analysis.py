@@ -7,13 +7,14 @@ from pyspark.ml.clustering import KMeans as SparkKMeans
 from pyspark.ml.linalg import Vectors
 from pyspark.sql import functions as F
 from sentence_transformers import SentenceTransformer
+from sklearn.cluster import KMeans as SkKMeans
 from sklearn.cluster import KMeans as SklearnKMeans
 from tqdm import tqdm
 from transformers import pipeline
 
-from src.config import settings
 from src.common import utils
 from src.common.utils import get_spark_session
+from src.config import settings
 
 # (get_llm_pipeline function is unchanged)
 model_cache = {}
@@ -202,8 +203,6 @@ def _run_global_analysis_spark(engine):
                                                          F.col("prediction").alias("topic_id"))
         except Exception as e:
             print("⚠️  Spark KMeans crashed; using sklearn fallback on driver.")
-            from sklearn.cluster import KMeans as SkKMeans
-            import pandas as pd
             np_emb = np.array([r.features.toArray() for r in embed_df.collect()])
             k_local = min(num_topics, len(np_emb))
             sk = SkKMeans(n_clusters=k_local, random_state=42, n_init=10)
@@ -237,8 +236,9 @@ Summary:
 """
             try:
                 summary = \
-                generator(prompt, truncation=True, max_length=512, max_new_tokens=150, min_length=30, do_sample=False)[
-                    0]['generated_text']
+                    generator(prompt, truncation=True, max_new_tokens=150, min_length=30,
+                              do_sample=False)[
+                        0]['generated_text']
             except Exception as e:
                 summary = f"Error generating summary: {e}"
             summaries.append((topic_id, summary))

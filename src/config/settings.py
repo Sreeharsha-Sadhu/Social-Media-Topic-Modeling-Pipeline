@@ -1,6 +1,7 @@
 # config.py
 
 import os
+
 from dotenv import load_dotenv
 
 # --- Load Environment Variables ---
@@ -30,7 +31,6 @@ USERS_JSON_PATH = os.path.join(DATA_DIR, "users.json")
 EDGELIST_PATH = os.path.join(DATA_DIR, "follows.edgelist")
 FOLLOWS_JSON_PATH = os.path.join(DATA_DIR, "follows.json")
 POSTS_JSON_PATH = os.path.join(DATA_DIR, "posts.json")
-
 
 # --- Spark Configuration ---
 USE_SPARK_ETL = os.getenv("USE_SPARK_ETL", "false").lower() == "true"
