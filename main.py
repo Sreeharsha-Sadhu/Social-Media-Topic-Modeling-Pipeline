@@ -1,12 +1,12 @@
 # main.py
 
 import sys
-from src.common import utils
-from src.etl import stage_3_etl, stage_1_generation, stage_2_content
-from src.analysis import stage_4_analysis
-from src.ui import stage_5_ui_helpers
+from src.old.common import utils
+from src.old.etl import stage_1_generation, stage_2_content, stage_3_etl
+from src.old.analysis import stage_4_analysis
+from src.old.ui import stage_5_ui_helpers
 # --- MODIFIED IMPORTS ---
-from src.analysis.live_analyzer import (
+from src.old.analysis import (
     analyze_reddit_feed,
     analyze_linkedin_feed,
     analyze_twitter_feed

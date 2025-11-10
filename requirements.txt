@@ -1,3 +1,5 @@
+rich
+click
 networkx
 psycopg2-binary
 pandas

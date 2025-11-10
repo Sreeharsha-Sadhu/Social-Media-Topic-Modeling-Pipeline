@@ -1,22 +1,41 @@
-# stage_2_content.py
+"""
+stage_2_generate_posts.py
+----------------------------------
+Stage 2: Synthetic Post & Follows Data Generation
+
+Uses the user base created in Stage 1 to generate realistic
+social-media-style posts for each user and transforms the
+follows.edgelist graph into follows.json format.
+
+Outputs:
+  - posts.json      : Synthetic posts with timestamps.
+  - follows.json    : List of user follow relationships.
+"""
 
 import json
 import random
 import uuid
-from datetime import datetime, timedelta, timezone
-
 import networkx as nx
+from datetime import datetime, timedelta, timezone
 from tqdm import tqdm
+from typing import Dict, List, Tuple, Any
 
-from src.common.utils import check_file_prerequisites
-from src.config import settings
+from src.core import config
+from src.core.utils import check_file_prerequisites
+from src.core.logging_config import get_logger
 
-# --- Configuration ---
-AVG_POSTS_PER_USER = 40
+# ---------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------
+logger = get_logger(__name__)
 
-# ... (POST_TEMPLATES and TOPIC_FILLERS dictionaries are unchanged) ...
-# (Copy/Paste the full POST_TEMPLATES and TOPIC_FILLERS dicts from your notebook here)
-POST_TEMPLATES = {
+AVG_POSTS_PER_USER: int = 40
+SEED: int = 42  # Set to None for full randomness
+
+# ---------------------------------------------------------------------
+# Post Template Definitions
+# ---------------------------------------------------------------------
+POST_TEMPLATES: Dict[str, List[str]] = {
     "AI Researcher": [
         "Just read a fascinating paper on {topic}. The implications for {field} are huge.",
         "My hot take: {topic} is completely overhyped. The real breakthrough is still 5 years away.",
@@ -73,9 +92,9 @@ POST_TEMPLATES = {
     ]
 }
 
-TOPIC_FILLERS = {
-    "{topic}": ["RAG systems", "scaling laws", "GANs", "customer churn", "React hooks", "CSS grid", "inflation",
-                "the playoffs", "Stardew Valley", "immigration policy", "Japan", "sourdough bread"],
+# Placeholder keyword fillers
+TOPIC_FILLERS: Dict[str, List[str]] = {
+    "{topic}": ["RAG systems", "scaling laws", "GANs", "customer churn", "React hooks", "CSS grid"],
     "{field}": ["NLP", "robotics", "e-commerce", "frontend dev", "macroeconomics"],
     "{conf}": ["NeurIPS", "ICLR", "WWDC", "JSConf"],
     "{library}": ["PyTorch", "Pandas", "React", "D3.js"],
@@ -122,7 +141,11 @@ TOPIC_FILLERS = {
 }
 
 
-def get_random_timestamp():
+# ---------------------------------------------------------------------
+# Helper Functions
+# ---------------------------------------------------------------------
+def get_random_timestamp() -> str:
+    """Generate a pseudo-random timestamp (within the past month)."""
     now = datetime.now(timezone.utc)
     delta = timedelta(days=random.randint(0, 30),
                       hours=random.randint(0, 23),
@@ -130,70 +153,79 @@ def get_random_timestamp():
     return (now - delta).isoformat() + "Z"
 
 
-def generate_post_content(personas):
+def generate_post_content(personas: List[str]) -> str:
+    """Generate post text for a given user's personas."""
     persona = random.choices(personas, weights=[0.7, 0.3], k=1)[0]
     template = random.choice(POST_TEMPLATES[persona])
     content = template
-    placeholders = [key for key in TOPIC_FILLERS.keys() if key in content]
-    for key in placeholders:
-        content = content.replace(key, random.choice(TOPIC_FILLERS[key]), 1)
+    for placeholder, options in TOPIC_FILLERS.items():
+        if placeholder in content:
+            content = content.replace(placeholder, random.choice(options), 1)
     return content
 
 
-def main():
-    """Main function to run Stage 2."""
-    print("--- Starting Stage 2 ---")
-    
-    # Prerequisite check
+# ---------------------------------------------------------------------
+# Main Stage Function
+# ---------------------------------------------------------------------
+def main() -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """Execute Stage 2: Generate synthetic posts and follow data."""
+    logger.info("🚀 Starting Stage 2: Generate Posts & Follows")
+
+    # Set reproducibility
+    if SEED is not None:
+        random.seed(SEED)
+
+    # Prerequisite Check
     success, msg = check_file_prerequisites(2)
     if not success:
-        print(f"🚨 ERROR: {msg}")
-        return
-    
-    # Load users from Stage 1
-    print(f"Loading users from '{settings.USERS_JSON_PATH}'...")
-    with open(settings.USERS_JSON_PATH, 'r') as f:
+        logger.error(f"🚨 Stage 2 prerequisites failed: {msg}")
+        return [], []
+
+    # Load users
+    with open(config.USERS_JSON_PATH, "r", encoding="utf-8") as f:
         users = json.load(f)
-    
-    # Generate "Original Posts"
-    all_posts = []
-    print(f"Generating synthetic posts for {len(users)} users...")
+    logger.info(f"Loaded {len(users)} users from {config.USERS_JSON_PATH}")
+
+    # Generate posts
+    all_posts: List[Dict[str, Any]] = []
+    logger.info("Generating posts for each user...")
+
     for user in tqdm(users, desc="Generating Posts"):
-        user_id = user['user_id']
-        personas = user['personas']
+        user_id = user["user_id"]
+        personas = user["personas"]
         num_posts = random.randint(AVG_POSTS_PER_USER - 15, AVG_POSTS_PER_USER + 15)
+
         for _ in range(num_posts):
-            post_content = generate_post_content(personas)
-            all_posts.append({
+            post = {
                 "post_id": str(uuid.uuid4()),
                 "author_id": user_id,
-                "content": post_content,
-                "created_at": get_random_timestamp()
-            })
-    
-    # Save Posts to JSON
-    print(f"\nSaving {len(all_posts)} posts to '{settings.POSTS_JSON_PATH}'...")
-    with open(settings.POSTS_JSON_PATH, "w") as f:
+                "content": generate_post_content(personas),
+                "created_at": get_random_timestamp(),
+            }
+            all_posts.append(post)
+
+    logger.info(f"✅ Generated {len(all_posts)} total posts.")
+
+    # Save posts to JSON
+    with open(config.POSTS_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(all_posts, f, indent=2)
-    
-    # Convert 'follows.edgelist' to 'follows.json'
-    print(f"Converting '{settings.EDGELIST_PATH}' to '{settings.FOLLOWS_JSON_PATH}'...")
+    logger.info(f"📁 Posts saved → {config.POSTS_JSON_PATH}")
+
+    # Convert follows.edgelist → follows.json
+    follows_list: List[Dict[str, str]] = []
     try:
-        G = nx.read_edgelist(settings.EDGELIST_PATH, create_using=nx.DiGraph())
-        follows_list = []
+        G = nx.read_edgelist(config.EDGELIST_PATH, create_using=nx.DiGraph())
         for follower, followed in G.edges():
-            follows_list.append({
-                "follower_id": follower,
-                "followed_id": followed
-            })
-        with open(settings.FOLLOWS_JSON_PATH, "w") as f:
+            follows_list.append({"follower_id": follower, "followed_id": followed})
+
+        with open(config.FOLLOWS_JSON_PATH, "w", encoding="utf-8") as f:
             json.dump(follows_list, f, indent=2)
-        print(f"Successfully converted {len(follows_list)} follow relationships.")
-    
+        logger.info(f"📁 Follows saved → {config.FOLLOWS_JSON_PATH} ({len(follows_list)} relationships)")
     except FileNotFoundError:
-        print(f"ERROR: '{settings.EDGELIST_PATH}' not found. Did Stage 1 run correctly?")
-    
-    print("\n--- Stage 2 Complete ---")
+        logger.error(f"❌ Missing '{config.EDGELIST_PATH}'. Did Stage 1 run correctly?")
+
+    logger.info("🏁 Stage 2 completed successfully.")
+    return all_posts, follows_list
 
 
 if __name__ == "__main__":
