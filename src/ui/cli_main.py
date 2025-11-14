@@ -1,243 +1,321 @@
 """
-CLI and Menu Entry Point
-──────────────────────────────────────────────
-Now includes:
-  • Menu-based UI
-  • Click-based CLI
-  • Integrated Reddit & LinkedIn Live Analysis
+CLI + Menu entrypoint for the Social Media Topic & Summary Tool.
+
+Provides:
+ - Interactive menu (keyboard-driven)
+ - Click-based CLI for scripted usage
+
+Uses Rich for nicer output when available; falls back to plain text.
 """
+
+from __future__ import annotations
 
 import sys
 import logging
+from typing import Optional
+
 import click
-from rich.console import Console
-from rich.logging import RichHandler
 
 from src.core import utils
-from src.data_pipeline import (
-    stage1_generate_users,
-    stage2_generate_posts,
-    stage3_etl,
-    stage4_global_analysis,
-)
+from src.core.logging_config import get_logger
+
+# pipeline modules (existing project)
+from src.data_pipeline import stage1_generate_users, stage2_generate_posts, stage3_etl, stage4_global_analysis
 from src.ui import stage5_ui_helpers
 
-# Live fetchers (new)
-from src.live.live_reddit import fetch_reddit_user_posts
-from src.live.live_linkedin import fetch_linkedin_user_posts
+logger = get_logger(__name__)
 
-console = Console()
+# Try to import optional live analyzers (these were uploaded by you)
+try:
+    from src.live.live_reddit import fetch_reddit_user_posts
+except Exception:
+    fetch_reddit_user_posts = None
+try:
+    from src.live.live_linkedin import fetch_linkedin_user_posts
+except Exception:
+    fetch_linkedin_user_posts = None
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(console=console, markup=True)],
-)
-logger = logging.getLogger("CLI")
+# Try to import Rich
+try:
+    from rich.console import Console
+    from rich.logging import RichHandler
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    console = Console()
+    USE_RICH = True
+except Exception:
+    USE_RICH = False
+    console = None
 
+# configure logging (uses your logging_config.get_logger already)
+if USE_RICH:
+    import logging as _logging
+    _logging.basicConfig(level=_logging.INFO, handlers=[RichHandler()])
+else:
+    logging.basicConfig(level=logging.INFO)
 
-# ─────────────────────────────────────────────
-# Helper: Confirmation
-# ─────────────────────────────────────────────
+# utility
 def confirm_continue(prompt: str) -> bool:
     return input(f"{prompt} (y/n): ").strip().lower() == "y"
 
-
-# ─────────────────────────────────────────────
-# Database Setup
-# ─────────────────────────────────────────────
-def setup_database():
-    utils.clear_screen()
-    console.print("[bold cyan]--- Setting Up Database ---[/bold cyan]")
-    if not confirm_continue("This will DROP existing tables. Continue?"):
-        return
-
-    stage3_etl.create_tables()
-    stage4_global_analysis.setup_database_tables()
-
-    console.print("[green]Database setup complete.[/green]")
-    input("\nPress Enter to return...")
-
-
-# ─────────────────────────────────────────────
-# Stage Launchers
-# ─────────────────────────────────────────────
+# --- Stage wrappers -----------------------------------------------------
 def run_stage_1():
     utils.clear_screen()
     stage1_generate_users.main()
     input("\nPress Enter to return...")
 
-
 def run_stage_2():
     utils.clear_screen()
     ok, msg = utils.check_file_prerequisites(2)
     if not ok:
-        console.print(f"[red]{msg}[/red]")
+        if USE_RICH:
+            console.print(f"[red]Prerequisite failed:[/red] {msg}")
+        else:
+            print(f"Prerequisite failed: {msg}")
         if confirm_continue("Run Stage 1 now?"):
             run_stage_1()
-            console.print("Retrying Stage 2...")
+            utils.clear_screen()
             stage2_generate_posts.main()
     else:
         stage2_generate_posts.main()
     input("\nPress Enter to return...")
 
-
-def run_stage_3():
+def run_stage_3(mode: str = "pandas"):
     utils.clear_screen()
-    ok, msg = utils.check_file_prerequisites(3)
-    if not ok:
-        console.print(f"[red]{msg}[/red]")
-    else:
+    if mode == "spark":
         stage3_etl.run_etl()
+    else:
+        # Pandas ETL
+        stage3_etl._run_etl_pandas()
     input("\nPress Enter to return...")
 
-
-def run_stage_4():
+def run_stage_4_interactive():
     utils.clear_screen()
-    console.print("[bold cyan]--- Launching Batch Topic Analysis ---[/bold cyan]")
-    if confirm_continue("Continue?"):
-        stage4_global_analysis.run_global_analysis()
+    if USE_RICH:
+        console.print(Panel("[bold cyan]Launch Global Topic Model (Batch AI)[/bold cyan]"))
+    else:
+        print("Launch Global Topic Model (Batch AI)")
+    if not confirm_continue("Continue?"):
+        return
+    stage4_global_analysis.run_global_analysis()
     input("\nPress Enter to return...")
-
 
 def run_stage_5():
     utils.clear_screen()
     stage5_ui_helpers.view_global_topics()
     input("\nPress Enter to return...")
 
+def list_users():
+    utils.clear_screen()
+    stage5_ui_helpers.list_all_users()
+    input("\nPress Enter to return...")
 
-# ─────────────────────────────────────────────
-# NEW: Live Analysis Interface
-# ─────────────────────────────────────────────
-def run_live_analysis_menu():
-    """
-    Presents source selection:
-      • Reddit
-      • LinkedIn
-    Then calls the unified Stage 4 live-analysis pipeline.
-    """
+# --- Live analysis helpers ---------------------------------------------
+def _perform_live_reddit_analysis_prompt():
+    utils.clear_screen()
+    print("Live Reddit Topic Analysis")
+    user_id = input("Enter the User ID (e.g., user_1): ").strip()
+    if not user_id:
+        print("User ID required.")
+        input("\nPress Enter to return...")
+        return
+    top_n_raw = input("Fetch top N posts (default 50): ").strip()
+    top_n = int(top_n_raw) if top_n_raw.isdigit() else 50
 
-    while True:
-        utils.clear_screen()
-        console.rule("[bold magenta]Live Social Feed Analysis[/bold magenta]")
+    if fetch_reddit_user_posts is None:
+        msg = "Reddit fetcher not available. Ensure src.live.live_reddit is present."
+        if USE_RICH:
+            console.print(f"[red]{msg}[/red]")
+        else:
+            print(msg)
+        input("\nPress Enter to return...")
+        return
 
-        console.print("[cyan]1.[/cyan] Analyze Reddit Feed")
-        console.print("[cyan]2.[/cyan] Analyze LinkedIn Feed")
-        console.print("[cyan]3.[/cyan] Back")
-        console.print("-" * 50)
-
-        choice = input("Choose source: ").strip()
-
-        if choice == "3":
-            return
-
-        if choice not in ("1", "2"):
-            input("Invalid option. Press Enter...")
-            continue
-
-        # Choose user
-        utils.clear_screen()
-        stage5_ui_helpers.list_all_users()
-
-        user_id = input("\nEnter User ID to analyze (e.g., user_1): ").strip()
-        if not user_id:
-            input("Invalid user. Press Enter...")
-            continue
-
-        # Choose max items
-        try:
-            top_n = int(input("How many posts to process (recommended 50–100)? ").strip())
-        except ValueError:
-            top_n = 50
-
-        utils.clear_screen()
-        console.print("[cyan]Running live topic analysis...[/cyan]")
-
-        # Select source
-        if choice == "1":
-            # Reddit
-            stage4_global_analysis.run_live_analysis_for_user(
+    if USE_RICH:
+        with console.status("[bold green]Running live Reddit analysis...[/bold green]"):
+            res = stage4_global_analysis.run_live_analysis_for_user(
                 user_id=user_id,
                 source="reddit",
                 fetcher_callable=fetch_reddit_user_posts,
-                top_n=top_n,
+                top_n=top_n
             )
-        elif choice == "2":
-            # LinkedIn
-            stage4_global_analysis.run_live_analysis_for_user(
+    else:
+        print("Running live Reddit analysis...")
+        res = stage4_global_analysis.run_live_analysis_for_user(
+            user_id=user_id,
+            source="reddit",
+            fetcher_callable=fetch_reddit_user_posts,
+            top_n=top_n
+        )
+
+    utils.clear_screen()
+    stage5_ui_helpers.display_live_result(res)
+    input("\nPress Enter to return...")
+
+def _perform_live_linkedin_analysis_prompt():
+    utils.clear_screen()
+    print("Live LinkedIn Topic Analysis")
+    user_id = input("Enter the User ID (e.g., user_1): ").strip()
+    if not user_id:
+        print("User ID required.")
+        input("\nPress Enter to return...")
+        return
+    top_n_raw = input("Fetch top N posts (default 50): ").strip()
+    top_n = int(top_n_raw) if top_n_raw.isdigit() else 50
+
+    if fetch_linkedin_user_posts is None:
+        msg = "LinkedIn fetcher not available. Ensure src.live.live_linkedin is present."
+        if USE_RICH:
+            console.print(f"[red]{msg}[/red]")
+        else:
+            print(msg)
+        input("\nPress Enter to return...")
+        return
+
+    if USE_RICH:
+        with console.status("[bold green]Running live LinkedIn analysis...[/bold green]"):
+            res = stage4_global_analysis.run_live_analysis_for_user(
                 user_id=user_id,
                 source="linkedin",
                 fetcher_callable=fetch_linkedin_user_posts,
-                top_n=top_n,
+                top_n=top_n
             )
+    else:
+        print("Running live LinkedIn analysis...")
+        res = stage4_global_analysis.run_live_analysis_for_user(
+            user_id=user_id,
+            source="linkedin",
+            fetcher_callable=fetch_linkedin_user_posts,
+            top_n=top_n
+        )
 
-        input("\nPress Enter to return...")
+    utils.clear_screen()
+    stage5_ui_helpers.display_live_result(res)
+    input("\nPress Enter to return...")
 
-
-# ─────────────────────────────────────────────
-# Main Menu
-# ─────────────────────────────────────────────
+# --- Interactive main menu ---------------------------------------------
 def main_menu():
-    options = {
-        "1": ("Setup Database", setup_database),
-        "2": ("Run Stage 1: Generate Users", run_stage_1),
-        "3": ("Run Stage 2: Generate Posts", run_stage_2),
-        "4": ("Run Stage 3: Run ETL", run_stage_3),
-        "5": ("Run Stage 4: Batch Topic Analysis", run_stage_4),
-        "6": ("Run Stage 5: View Global Topics", run_stage_5),
-        "7": ("List All Users", stage5_ui_helpers.list_all_users),
-        "8": ("Live Social Feed Analysis", run_live_analysis_menu),
-        "9": ("Exit", lambda: sys.exit(console.print("[bold red]Exiting...[/bold red]"))),
-    }
-
     while True:
         utils.clear_screen()
-        console.rule("[bold magenta]Social Media Topic & Summary Tool[/bold magenta]")
-
-        for key, (label, _) in options.items():
-            console.print(f"[cyan]{key}.[/cyan] {label}")
-
-        console.print("-" * 50)
-        choice = input("Enter choice: ").strip()
-
-        if choice in options:
-            utils.clear_screen()
-            _, action = options[choice]
-            action()
+        if USE_RICH:
+            console.rule("[bold magenta] Social Media Topic & Summary Tool [/bold magenta]")
+            console.print("[cyan]1[/cyan] → Setup Database")
+            console.print("[cyan]2[/cyan] → Run Stage 1: Generate Users")
+            console.print("[cyan]3[/cyan] → Run Stage 2: Generate Posts")
+            console.print("[cyan]4[/cyan] → Run Stage 3: ETL")
+            console.print("[cyan]5[/cyan] → Run Stage 4: Global Topic Model")
+            console.print("[cyan]6[/cyan] → Run Stage 5: View Global Topics")
+            console.print("[cyan]7[/cyan] → List All Users")
+            console.print("[cyan]8[/cyan] → Live Reddit Analysis")
+            console.print("[cyan]9[/cyan] → Live LinkedIn Analysis")
+            console.print("[cyan]x[/cyan] → Exit")
         else:
-            input("Invalid option. Press Enter...")
+            print("────────────────────── Social Media Topic & Summary Tool ──────────────────────")
+            print("1 → Setup Database")
+            print("2 → Run Stage 1: Generate Users")
+            print("3 → Run Stage 2: Generate Posts")
+            print("4 → Run Stage 3: ETL")
+            print("5 → Run Stage 4: Global Topic Model")
+            print("6 → Run Stage 5: View Global Topics")
+            print("7 → List All Users")
+            print("8 → Live Reddit Analysis")
+            print("9 → Live LinkedIn Analysis")
+            print("x → Exit")
 
+        choice = input("\nEnter your choice: ").strip().lower()
 
-# ─────────────────────────────────────────────
-# Click CLI
-# ─────────────────────────────────────────────
+        if choice == "1":
+            utils.clear_screen()
+            if confirm_continue("This will DROP some analysis tables. Continue?"):
+                stage3_etl.create_tables()
+                stage4_global_analysis.setup_database_tables()
+                if USE_RICH:
+                    console.print("[green]Database setup complete.[/green]")
+                else:
+                    print("Database setup complete.")
+                input("\nPress Enter to return...")
+        elif choice == "2":
+            run_stage_1()
+        elif choice == "3":
+            run_stage_2()
+        elif choice == "4":
+            # choose ETL mode if spark available
+            if confirm_continue("Run Spark ETL? (Otherwise Pandas)"):
+                run_stage_3(mode="spark")
+            else:
+                run_stage_3(mode="pandas")
+        elif choice == "5":
+            run_stage_4_interactive()
+        elif choice == "6":
+            run_stage_5()
+        elif choice == "7":
+            list_users()
+        elif choice == "8":
+            _perform_live_reddit_analysis_prompt()
+        elif choice == "9":
+            _perform_live_linkedin_analysis_prompt()
+        elif choice == "x":
+            if USE_RICH:
+                console.print("[bold red]Exiting... Goodbye![/bold red]")
+            else:
+                print("Exiting... Goodbye!")
+            sys.exit(0)
+        else:
+            input("Invalid choice. Press Enter to try again...")
+
+# --- Click CLI ---------------------------------------------------------
 @click.group()
 def cli():
+    """Social Media Topic & Summary Tool (CLI)."""
     pass
-
-
-@cli.command()
-def stage4():
-    console.print("[cyan]Running Stage 4 Analysis[/cyan]")
-    stage4_global_analysis.run_global_analysis()
-
-
-@cli.command()
-def live():
-    console.print("[cyan]Launching Live Analysis Menu[/cyan]")
-    run_live_analysis_menu()
-
 
 @cli.command()
 def menu():
+    """Launch interactive menu."""
     main_menu()
 
+@cli.command()
+@click.option("--etl", type=click.Choice(["pandas","spark"]), default="pandas")
+def etl(etl):
+    """Run ETL (Stage 3)."""
+    run_stage_3(mode=etl)
 
-# ─────────────────────────────────────────────
-# Entry Point
-# ─────────────────────────────────────────────
+@cli.command()
+def batch_analysis():
+    """Run batch global analysis (Stage 4)."""
+    stage4_global_analysis.run_global_analysis()
+
+@cli.command()
+@click.option("--user", required=True, help="User id (e.g., user_1)")
+@click.option("--source", type=click.Choice(["reddit","linkedin"]), default="reddit")
+@click.option("--top_n", default=50, help="Max posts to fetch (default 50)")
+def live(user: str, source: str, top_n: int):
+    """Run live analysis for a specific user+source."""
+    if source == "reddit":
+        fetcher = fetch_reddit_user_posts
+    else:
+        fetcher = fetch_linkedin_user_posts
+
+    if fetcher is None:
+        print(f"Fetcher for {source} not available.")
+        return
+
+    if USE_RICH:
+        with console.status(f"[bold green]Running live {source} analysis for {user}...[/bold green]"):
+            res = stage4_global_analysis.run_live_analysis_for_user(
+                user_id=user, source=source, fetcher_callable=fetcher, top_n=top_n
+            )
+    else:
+        print(f"Running live {source} analysis for {user}...")
+        res = stage4_global_analysis.run_live_analysis_for_user(
+            user_id=user, source=source, fetcher_callable=fetcher, top_n=top_n
+        )
+
+    stage5_ui_helpers.display_live_result(res)
+
+# Entrypoint
 if __name__ == "__main__":
+    # If command-line args provided => click CLI, else launch menu
     if len(sys.argv) > 1:
         cli()
     else:
