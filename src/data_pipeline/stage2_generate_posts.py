@@ -1,40 +1,44 @@
 """
-stage_2_generate_posts.py
-----------------------------------
-Stage 2: Synthetic Post & Follows Data Generation
+stage2_generate_posts.py
+------------------------------------------------------------
+Stage 2: Synthetic Post Generation & Follows Conversion
 
-Uses the user base created in Stage 1 to generate realistic
-social-media-style posts for each user and transforms the
-follows.edgelist graph into follows.json format.
+Reads:
+  - users.json        : Output from Stage 1
+  - follows.edgelist  : Also from Stage 1
 
-Outputs:
-  - posts.json      : Synthetic posts with timestamps.
-  - follows.json    : List of user follow relationships.
+Generates:
+  - posts.json        : Synthetic social-media-like posts
+  - follows.json      : JSON representation of user follow relationships
+
+This stage sets up all data needed by Stage 3 ETL.
 """
 
 import json
 import random
 import uuid
-import networkx as nx
 from datetime import datetime, timedelta, timezone
-from tqdm import tqdm
 from typing import Dict, List, Tuple, Any
 
-from src.core import config
-from src.core.utils import check_file_prerequisites
-from src.core.logging_config import get_logger
+import networkx as nx
+from tqdm import tqdm
 
-# ---------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------
+from src.core import config
+from src.core.logging_config import get_logger
+from src.core.utils import check_file_prerequisites
+
+# Logger
 logger = get_logger(__name__)
 
+# -------------------------------------------------------------------
+# Configuration
+# -------------------------------------------------------------------
 AVG_POSTS_PER_USER: int = 40
-SEED: int = 42  # Set to None for full randomness
+SEED: int = 42  # Set to None to disable deterministic output
 
-# ---------------------------------------------------------------------
-# Post Template Definitions
-# ---------------------------------------------------------------------
+# -------------------------------------------------------------------
+# Post Templates
+# -------------------------------------------------------------------
 POST_TEMPLATES: Dict[str, List[str]] = {
     "AI Researcher": [
         "Just read a fascinating paper on {topic}. The implications for {field} are huge.",
@@ -92,7 +96,6 @@ POST_TEMPLATES: Dict[str, List[str]] = {
     ]
 }
 
-# Placeholder keyword fillers
 TOPIC_FILLERS: Dict[str, List[str]] = {
     "{topic}": ["RAG systems", "scaling laws", "GANs", "customer churn", "React hooks", "CSS grid"],
     "{field}": ["NLP", "robotics", "e-commerce", "frontend dev", "macroeconomics"],
@@ -140,21 +143,22 @@ TOPIC_FILLERS: Dict[str, List[str]] = {
     "{texture}": ["soggy", "dense"]
 }
 
-
-# ---------------------------------------------------------------------
-# Helper Functions
-# ---------------------------------------------------------------------
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
 def get_random_timestamp() -> str:
-    """Generate a pseudo-random timestamp (within the past month)."""
+    """Generate a timestamp within the last 30 days."""
     now = datetime.now(timezone.utc)
-    delta = timedelta(days=random.randint(0, 30),
-                      hours=random.randint(0, 23),
-                      minutes=random.randint(0, 59))
+    delta = timedelta(
+        days=random.randint(0, 30),
+        hours=random.randint(0, 23),
+        minutes=random.randint(0, 59)
+    )
     return (now - delta).isoformat() + "Z"
 
 
 def generate_post_content(personas: List[str]) -> str:
-    """Generate post text for a given user's personas."""
+    """Generate a synthetic post based on persona templates."""
     persona = random.choices(personas, weights=[0.7, 0.3], k=1)[0]
     template = random.choice(POST_TEMPLATES[persona])
     content = template
@@ -163,68 +167,75 @@ def generate_post_content(personas: List[str]) -> str:
             content = content.replace(placeholder, random.choice(options), 1)
     return content
 
-
-# ---------------------------------------------------------------------
+# -------------------------------------------------------------------
 # Main Stage Function
-# ---------------------------------------------------------------------
+# -------------------------------------------------------------------
 def main() -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
-    """Execute Stage 2: Generate synthetic posts and follow data."""
-    logger.info("🚀 Starting Stage 2: Generate Posts & Follows")
+    logger.info("Starting Stage 2: Generate Posts & Follows")
 
-    # Set reproducibility
     if SEED is not None:
         random.seed(SEED)
 
-    # Prerequisite Check
-    success, msg = check_file_prerequisites(2)
-    if not success:
-        logger.error(f"🚨 Stage 2 prerequisites failed: {msg}")
+    # Check prerequisites
+    ok, msg = check_file_prerequisites(2)
+    if not ok:
+        logger.error(f"Stage 2 prerequisite failed: {msg}")
         return [], []
 
     # Load users
     with open(config.USERS_JSON_PATH, "r", encoding="utf-8") as f:
         users = json.load(f)
-    logger.info(f"Loaded {len(users)} users from {config.USERS_JSON_PATH}")
+    logger.info(f"Loaded {len(users)} users for post generation")
 
     # Generate posts
     all_posts: List[Dict[str, Any]] = []
-    logger.info("Generating posts for each user...")
+    logger.info("Generating synthetic posts...")
 
     for user in tqdm(users, desc="Generating Posts"):
         user_id = user["user_id"]
         personas = user["personas"]
-        num_posts = random.randint(AVG_POSTS_PER_USER - 15, AVG_POSTS_PER_USER + 15)
+
+        num_posts = random.randint(
+            AVG_POSTS_PER_USER - 15,
+            AVG_POSTS_PER_USER + 15
+        )
 
         for _ in range(num_posts):
-            post = {
+            all_posts.append({
                 "post_id": str(uuid.uuid4()),
                 "author_id": user_id,
                 "content": generate_post_content(personas),
-                "created_at": get_random_timestamp(),
-            }
-            all_posts.append(post)
+                "created_at": get_random_timestamp()
+            })
 
-    logger.info(f"✅ Generated {len(all_posts)} total posts.")
+    logger.info(f"Generated {len(all_posts)} total posts.")
 
-    # Save posts to JSON
     with open(config.POSTS_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(all_posts, f, indent=2)
-    logger.info(f"📁 Posts saved → {config.POSTS_JSON_PATH}")
+    logger.info(f"Posts saved to {config.POSTS_JSON_PATH}")
 
-    # Convert follows.edgelist → follows.json
+    # Convert follows.edgelist to follows.json
     follows_list: List[Dict[str, str]] = []
     try:
         G = nx.read_edgelist(config.EDGELIST_PATH, create_using=nx.DiGraph())
         for follower, followed in G.edges():
-            follows_list.append({"follower_id": follower, "followed_id": followed})
+            follows_list.append({
+                "follower_id": follower,
+                "followed_id": followed
+            })
 
         with open(config.FOLLOWS_JSON_PATH, "w", encoding="utf-8") as f:
             json.dump(follows_list, f, indent=2)
-        logger.info(f"📁 Follows saved → {config.FOLLOWS_JSON_PATH} ({len(follows_list)} relationships)")
-    except FileNotFoundError:
-        logger.error(f"❌ Missing '{config.EDGELIST_PATH}'. Did Stage 1 run correctly?")
 
-    logger.info("🏁 Stage 2 completed successfully.")
+        logger.info(
+            f"Follows saved to {config.FOLLOWS_JSON_PATH} "
+            f"({len(follows_list)} relationships)"
+        )
+
+    except FileNotFoundError:
+        logger.error(f"Missing {config.EDGELIST_PATH}. Did Stage 1 run correctly?")
+
+    logger.info("Stage 2 completed successfully.")
     return all_posts, follows_list
 
 

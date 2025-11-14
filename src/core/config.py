@@ -9,68 +9,89 @@ for both Spark and local Pandas-based workflows.
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Optional
 
-# -------------------------------------------------------------------
-# Load Environment Variables
-# -------------------------------------------------------------------
-
-# Locate and load the .env file
+# Load .env from project root (if present)
 load_dotenv()
 
 # -------------------------------------------------------------------
-# Base Directories
+# Base directories
 # -------------------------------------------------------------------
-
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 SRC_DIR = BASE_DIR / "src"
 DATA_DIR = BASE_DIR / "data"
 LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # -------------------------------------------------------------------
-# Database Configuration
+# Database configuration (read from environment)
 # -------------------------------------------------------------------
+DB_NAME: Optional[str] = os.getenv("DB_NAME")
+DB_USER: Optional[str] = os.getenv("DB_USER")
+DB_PASS: Optional[str] = os.getenv("DB_PASS")
+DB_HOST: Optional[str] = os.getenv("DB_HOST")
+DB_PORT: Optional[str] = os.getenv("DB_PORT")
 
-DB_NAME = os.getenv("DB_NAME", "mmds")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASS = os.getenv("DB_PASS", "12345678")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-
-# -------------------------------------------------------------------
-# Reddit API Configuration
-# -------------------------------------------------------------------
-
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
-REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "mmds-reddit-client")
+# Helper: minimal check for DB configuration completeness
+def db_config_complete() -> bool:
+    """Return True if the minimal DB environment variables are present."""
+    return all([DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT])
 
 # -------------------------------------------------------------------
-# Data File Paths
+# API / External credentials
 # -------------------------------------------------------------------
+REDDIT_CLIENT_ID: Optional[str] = os.getenv("REDDIT_CLIENT_ID")
+REDDIT_CLIENT_SECRET: Optional[str] = os.getenv("REDDIT_CLIENT_SECRET")
+REDDIT_USER_AGENT: Optional[str] = os.getenv("REDDIT_USER_AGENT")
 
+# -------------------------------------------------------------------
+# Data file paths
+# -------------------------------------------------------------------
 USERS_JSON_PATH = DATA_DIR / "users.json"
 FOLLOWS_JSON_PATH = DATA_DIR / "follows.json"
 POSTS_JSON_PATH = DATA_DIR / "posts.json"
 EDGELIST_PATH = DATA_DIR / "follows.edgelist"
 
 # -------------------------------------------------------------------
-# Spark Configuration
+# Spark configuration
 # -------------------------------------------------------------------
-
-USE_SPARK_ETL = os.getenv("USE_SPARK_ETL", "false").lower() == "true"
-USE_SPARK_ANALYSIS = os.getenv("USE_SPARK_ANALYSIS", "false").lower() == "true"
-SPARK_MASTER = os.getenv("SPARK_MASTER", "local[*]")
-SPARK_APP_NAME = os.getenv("SPARK_APP_NAME", "SocialMediaETL")
-SPARK_ANALYSIS_TOPICS = int(os.getenv("SPARK_ANALYSIS_TOPICS", "20"))
+USE_SPARK_ETL: bool = os.getenv("USE_SPARK_ETL", "false").lower() == "true"
+USE_SPARK_ANALYSIS: bool = os.getenv("USE_SPARK_ANALYSIS", "false").lower() == "true"
+SPARK_MASTER: str = os.getenv("SPARK_MASTER", "local[*]")
+SPARK_APP_NAME: str = os.getenv("SPARK_APP_NAME", "SocialMediaETL")
+SPARK_ANALYSIS_TOPICS: int = int(os.getenv("SPARK_ANALYSIS_TOPICS", "20"))
 
 # -------------------------------------------------------------------
-# Logging Configuration Hook
+# Live data analysis toggle
 # -------------------------------------------------------------------
+USE_LIVE_ANALYSIS: bool = os.getenv("USE_LIVE_ANALYSIS", "false").lower() == "true"
 
+# -------------------------------------------------------------------
+# Database table name constants (used across the project)
+# -------------------------------------------------------------------
+TABLE_USERS = "users"
+TABLE_FOLLOWS = "follows"
+TABLE_POSTS = "posts"
+TABLE_GLOBAL_TOPICS = "global_topics"
+TABLE_POST_TOPIC_MAPPING = "post_topic_mapping"
+TABLE_LIVE_RESULTS = "live_results"
+
+# -------------------------------------------------------------------
+# Logging config helper
+# -------------------------------------------------------------------
 def get_log_file_path(filename: str = "mmds.log") -> Path:
     """
     Returns the full path for the primary project log file.
-    Creates a 'logs' directory under project root if not existing.
+    Ensures the logs directory exists.
     """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     return LOG_DIR / filename
+
+# -------------------------------------------------------------------
+# Misc helpers
+# -------------------------------------------------------------------
+def ensure_data_files_exist() -> None:
+    """Create an empty data directory and touch expected files (no-op if present)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    # don't create JSON files with content; keep them absent until generated by stages

@@ -1,24 +1,20 @@
-# Core
-python-dotenv
-pandas
-numpy
-sqlalchemy
-psycopg2-binary
-tqdm
-networkx
-
-# Spark (optional if USE_SPARK_ETL=true)
-pyspark>=3.5.0
-
-# ML / AI
-sentence-transformers
-scikit-learn
-transformers
-torch
-
-# UI / CLI
+python-dateutil
 click
 rich
-
-# Optional (future: Streamlit dashboard)
-streamlit
+pandas
+SQLAlchemy
+pyspark
+praw
+requests-html
+networkx
+tqdm
+psycopg2-binary
+ipython
+python-dotenv
+nest-asyncio
+pyppeteer
+torch
+sentence-transformers
+scikit-learn
+numpy
+transformers
