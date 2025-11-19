@@ -126,129 +126,104 @@ def _format_bullets(bullets: Optional[List[str]]) -> str:
     return "\n".join([f" • {b}" for b in bullets])
 
 
-def display_live_result(result: Dict[str, Any]):
+def display_live_result(result: dict):
     """
-    Pretty-print a live-run payload produced by stage4.run_live_analysis_for_user (or cached payload).
-    Expected formats:
-      {"status":"ok","payload": { "user_id":..., "source":..., "created_at":..., "post_count":..., "result": {...}, "post_ids":[...] } }
-      or cached fallback variations.
+    Unified renderer for BOTH:
+      - old global-mode output (flat)
+      - new subreddit-wise hierarchical output
     """
+
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+
+    console = Console()
+
     if not result:
-        print("No result to display.")
+        console.print("[red]No result to display.[/red]")
         return
-    
-    status = result.get("status", "unknown")
-    payload = result.get("payload") or result.get("result") or result.get("data") or None
-    
-    if payload is None:
-        # maybe result itself is the payload
-        if "user_id" in result:
-            payload = result
-        else:
-            if USE_RICH:
-                console.print("[yellow]No payload available in result.[/yellow]")
-            else:
-                print("No payload available in result.")
-            return
-    
-    user_id = payload.get("user_id", "unknown")
-    source = payload.get("source", "unknown")
-    created_at = payload.get("created_at", "unknown")
+
+    status = result.get("status")
+    payload = result.get("payload") or {}
+
+    # ----------------------------
+    # CASE 1 → NEW SUBREDDIT-WISE FLOW
+    # ----------------------------
+    if "subreddits" in payload:
+        user = payload.get("user_id", "?")
+        ts = payload.get("timestamp", "unknown")
+        allocations = payload.get("allocations", {})
+
+        console.rule(f"[bold cyan]{user} / reddit:subreddit_analysis[/bold cyan]")
+
+        # Summary header
+        console.print(
+            Panel.fit(
+                f"[bold]User:[/bold] {user}\n"
+                f"[bold]Run at:[/bold] {ts}\n"
+                f"[bold]Subreddits Analyzed:[/bold] {len(payload['subreddits'])}",
+                title="Per-Subreddit Analysis", style="bold blue"
+            )
+        )
+
+        # Table per subreddit
+        for subreddit, info in payload["subreddits"].items():
+            if "error" in info:
+                console.print(f"[red]Error for r/{subreddit}: {info['error']}[/red]")
+                continue
+
+            allocated = info.get("allocated", 0)
+            post_count = info.get("post_count", 0)
+            topics = info.get("topics", [])
+
+            sub_table = Table(title=f"r/{subreddit} — {post_count} posts (allocated {allocated})")
+
+            sub_table.add_column("Topic #")
+            sub_table.add_column("Title")
+            sub_table.add_column("Bullets", overflow="fold")
+
+            for t in topics:
+                bullets = "\n".join(f"- {b}" for b in t.get("bullets", []))
+                sub_table.add_row(str(t.get("topic_index")), t.get("title", ""), bullets)
+
+            console.print(sub_table)
+
+        return
+
+    # ----------------------------
+    # CASE 2 → OLD FLAT (GLOBAL) FLOW
+    # ----------------------------
     post_count = payload.get("post_count", 0)
-    res = payload.get("result") or payload.get("topics") or payload.get("analysis") or {}
-    
-    # top-level header
-    header_text = f"Live Analysis Result\nUser: {user_id}\nSource: {source}\nPosts processed: {post_count}\nRun at: {created_at}"
-    if USE_RICH:
-        console.rule("[bold green]Live Analysis Result[/bold green]")
-        console.print(Panel(header_text, title=f"[cyan]{user_id} / {source}[/cyan]"))
-    else:
-        print("Live Analysis Result")
-        print("-" * 60)
-        print(header_text)
-        print("-" * 60)
-    
-    # result payload rendering
-    rtype = res.get("type") if isinstance(res, dict) else None
-    
-    if rtype == "single_summary" or (isinstance(res, dict) and res.get("topics") and len(res.get("topics", [])) == 1):
-        # single-topic summary
-        topic = res["topics"][0] if "topics" in res else res
-        title = topic.get("title") or topic.get("topic_title") or "Untitled"
-        summary = topic.get("summary") or topic.get("summary_text") or ""
-        sample_posts = topic.get("sample_posts") or []
-        # optional additional fields (sentiment, bullets) if present in payload
-        sentiment = topic.get("sentiment")
-        bullets = topic.get("key_points") or topic.get("bullets")
-        
-        if USE_RICH:
-            summary_text = Text(summary)
-            panel = Panel.fit(f"[bold]{title}[/bold]\n\n{summary_text}\n\n{_format_bullets(bullets)}",
-                              title="Topic 0", border_style="magenta")
-            console.print(panel)
-            if sample_posts:
-                console.print(
-                    Panel("\n".join([f"- {s}" for s in sample_posts]), title="Sample Posts", border_style="blue"))
-            if sentiment:
-                console.print(f"[bold]Sentiment:[/bold] {sentiment}")
-        else:
-            print(f"\nTopic 0")
-            print(f"Title: {title}")
-            print(f"Summary:\n{summary}\n")
-            if bullets:
-                print("Key points:")
-                print(_format_bullets(bullets))
-            if sample_posts:
-                print("\nSample Posts:")
-                for s in sample_posts:
-                    print(f" - {s}")
-    
-    elif rtype == "clustered" or (isinstance(res, dict) and res.get("topics")):
-        topics = res.get("topics", [])
-        for t in topics:
-            tidx = t.get("topic_index") or t.get("topic_id") or t.get("topic_index") or 0
-            title = t.get("title") or "Untitled"
-            summary = t.get("summary") or ""
-            sample_posts = t.get("sample_posts") or []
-            bullets = t.get("key_points") or t.get("key_bullets") or t.get("sample_bullets") or None
-            sentiment = t.get("sentiment")
-            
-            if USE_RICH:
-                panel = Panel.fit(f"[bold]{title}[/bold]\n\n{summary}\n\n{_format_bullets(bullets)}",
-                                  title=f"Topic {tidx}", border_style="magenta")
-                console.print(panel)
-                if sample_posts:
-                    console.print(
-                        Panel("\n".join([f"- {s}" for s in sample_posts]), title="Sample Posts", border_style="blue"))
-                if sentiment:
-                    console.print(f"[bold]Sentiment:[/bold] {sentiment}")
-            else:
-                print(f"\nTopic {tidx}")
-                print(f"Title: {title}")
-                print(f"Summary:\n{summary}\n")
-                if bullets:
-                    print("Key points:")
-                    print(_format_bullets(bullets))
-                if sample_posts:
-                    print("Sample posts:")
-                    for s in sample_posts:
-                        print(f" - {s}")
-    
-    else:
-        # unknown/residual format — pretty-print available keys
-        if USE_RICH:
-            console.print_json(json.dumps(res))
-        else:
-            print("Result (raw):")
-            print(json.dumps(res, indent=2))
-    
-    # footer: show cached id if present
-    output_id = payload.get("output_id")
-    if output_id:
-        if USE_RICH:
-            console.print(f"[dim]Stored output_id: {output_id}[/dim]")
-        else:
-            print(f"[Stored output_id: {output_id}]")
+    ts = payload.get("created_at", "unknown")
+    user = payload.get("user_id", "?")
+
+    console.rule(f"[bold cyan]{user} / {payload.get('source','reddit')}[/bold cyan]")
+
+    console.print(
+        Panel.fit(
+            f"[bold]User:[/bold] {user}\n"
+            f"[bold]Posts processed:[/bold] {post_count}\n"
+            f"[bold]Run at:[/bold] {ts}",
+            title="Live Analysis Result"
+        )
+    )
+
+    res = payload.get("result")
+    if not res:
+        console.print("[yellow]No summary returned.[/yellow]")
+        return
+
+    # Render topics (flat mode)
+    table = Table(title="Topics")
+    table.add_column("Index")
+    table.add_column("Title")
+    table.add_column("Bullets", overflow="fold")
+
+    for t in res.get("topics", []):
+        bullets = "\n".join(f"- {b}" for b in t.get("bullets", []))
+        table.add_row(str(t.get("topic_index")), t.get("title", ""), bullets)
+
+    console.print(table)
 
 
 # Optional small test runner

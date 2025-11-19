@@ -1,17 +1,17 @@
 """
 stage2_generate_posts.py
 ------------------------------------------------------------
-Stage 2: Synthetic Post Generation & Follows Conversion
+Stage 2: Synthetic Reddit-style Post Generation
 
 Reads:
-  - users.json        : Output from Stage 1
-  - follows.edgelist  : Also from Stage 1
+  - users.json
+  - follows.edgelist
 
 Generates:
-  - posts.json        : Synthetic social-media-like posts
-  - follows.json      : JSON representation of user follow relationships
-
-This stage sets up all data needed by Stage 3 ETL.
+  - posts.json: each post has fields:
+      post_id, author_id, subreddit, title, selftext, content (title + '\n\n' + selftext),
+      created_at (ISO), score, num_comments
+  - follows.json
 """
 
 import json
@@ -27,156 +27,126 @@ from src.core import config
 from src.core.logging_config import get_logger
 from src.core.utils import check_file_prerequisites
 
-# Logger
 logger = get_logger(__name__)
 
 # -------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------
 AVG_POSTS_PER_USER: int = 40
-SEED: int = 42  # Set to None to disable deterministic output
+SEED: int = 42  # deterministic default
 
 # -------------------------------------------------------------------
-# Post Templates
+# Title and body templates tuned to subreddit topics (improves topic modelling)
 # -------------------------------------------------------------------
-POST_TEMPLATES: Dict[str, List[str]] = {
-    "AI Researcher": [
-        "Just read a fascinating paper on {topic}. The implications for {field} are huge.",
-        "My hot take: {topic} is completely overhyped. The real breakthrough is still 5 years away.",
-        "Anyone else attending the {conf} conference? Excited to see the talks on {topic}.",
-        "Struggling with this new {library} implementation. Why is {detail} so non-intuitive?",
+SUBREDDIT_TEMPLATES = {
+    "machinelearning": [
+        ("New paper on {topic} - thoughts?", "I found this paper discussing {topic} and its implications for {field}. Key points: {finding}."),
+        ("How do you handle {detail} in production?", "I'm struggling with {detail} when deploying models. Has anyone used {library} or similar approaches?")
     ],
-    "Data Scientist": [
-        "Finished my analysis on {dataset}. Turns out the primary driver for {metric} is {finding}.",
-        "Python's {library} is a lifesaver for {task}.",
-        "Building a new {model} model to predict {metric}. So far the results are... interesting.",
-        "Hot take: 90% of data science is just cleaning {dataset} data.",
+    "datascience": [
+        ("Analysis of {dataset} shows {finding}", "I ran an analysis on {dataset}. The main driver appears to be {finding}. Methods used: {method}."),
+        ("Best visualization for {metric}?", "Looking for suggestions to visualize {metric} across categories. Current approach: {approach}.")
     ],
-    "Web Developer": [
-        "Why did we ever use {old_tech}? {new_tech} is so much cleaner.",
-        "Just deployed the new {feature} to prod. Fingers crossed!",
-        "TIL about this weird CSS bug in {browser}. Nightmare fuel.",
-        "Debating {framework_a} vs {framework_b} for the new project. Thoughts?",
+    "python": [
+        ("Why does {library} raise {error}?", "I'm getting {error} while using {library}. Minimal example: ..."),
+        ("Tips for optimizing {task} in Python", "I've been profiling {task}. Any recommended libraries or patterns?")
     ],
-    "Financial Analyst": [
-        "{stock} is looking seriously {sentiment} after their earnings call.",
-        "The {market_event} is going to have a major impact on {sector} stocks.",
-        "My model predicts a {movement} for {stock} in Q{quarter}.",
-        "Deep dive into {company}'s 10-K. Their {metric} looks suspicious.",
+    "technology": [
+        ("Big industry update: {event}", "Discussion: {event} and how it affects {sector}. Opinions?"),
+        ("Thread: {product} launch analysis", "Short summary of the product features and pros/cons.")
     ],
-    "NBA Fanatic": [
-        "Can you believe that {player} trade? The {team} got fleeced!",
-        "{player} is the GOAT, I don't care what anyone says.",
-        "That game last night was insane. {team} totally choked in the {quarter}.",
-        "My prediction for the finals: {team} vs {team}.",
+    "news": [
+        ("Breaking: {headline}", "Summary: {headline} — what we know so far: {details}."),
+        ("Discussion: {policy} and its impact", "Policy {policy} will likely affect {group}. Thoughts?")
     ],
-    "Indie Gamer": [
-        "Just sank 40 hours into {game}. It's a masterpiece of {genre}.",
-        "Stop playing {aaa_game} and go play {game}. You won't regret it.",
-        "The art style in {game} is just breathtaking.",
-        "Shoutout to the solo dev of {game}. Incredible achievement.",
+    "science": [
+        ("New study on {subject}", "Paper summary: {finding}. What does this mean for {field}?"),
+        ("Question about {concept}", "I'm trying to understand {concept}. Can someone explain?")
     ],
-    "Political Commentator": [
-        "The new {policy} is a disaster for {group}.",
-        "Can't believe what {politician} said about {issue}. Completely out of touch.",
-        "The upcoming {election} is the most important one yet.",
-        "Reading the latest poll on {issue}. The numbers are surprising.",
+    "politics": [
+        ("What do you think about {policy}?", "Short analysis and links: {links}. Repercussions may include {effects}."),
+        ("Polling shows {result}", "Interpretation: {interpretation}.")
     ],
-    "World Traveler": [
-        "Just landed in {city}! The {food} is incredible.",
-        "Back from {country}. My favorite part was definitely {activity}.",
-        "Packing for {country}. Any tips for {activity}?",
-        "That {airline} flight was rough, but the view of {landmark} was worth it.",
+    "movies": [
+        ("Reaction to {movie} ending", "I just watched {movie} and the ending struck me because {reason}."),
+        ("Top films about {topic}", "I recommend these films: {list}.")
     ],
-    "Aspiring Chef": [
-        "Tonight's experiment: {dish} with a {ingredient} twist. It actually worked!",
-        "Perfected my {technique} for {food}. The secret is {secret}.",
-        "I will never buy {food} from a store again. Homemade is so much better.",
-        "Failed attempt at {dish}. It was a {texture} mess.",
+    "investing": [
+        ("Is {stock} a buy after {event}?", "Catalysts: {catalyst}. My thesis: {thesis}."),
+        ("Market thoughts: {macro_event}", "How might {macro_event} affect asset classes?")
+    ],
+    "indiegaming": [
+        ("Devlog: {game} progress", "Work done this week: {work}. Roadmap: {roadmap}."),
+        ("Looking for feedback on gameplay loop", "Short description of the loop and ask for critique.")
     ]
 }
 
-TOPIC_FILLERS: Dict[str, List[str]] = {
-    "{topic}": ["RAG systems", "scaling laws", "GANs", "customer churn", "React hooks", "CSS grid"],
-    "{field}": ["NLP", "robotics", "e-commerce", "frontend dev", "macroeconomics"],
-    "{conf}": ["NeurIPS", "ICLR", "WWDC", "JSConf"],
-    "{library}": ["PyTorch", "Pandas", "React", "D3.js"],
-    "{detail}": ["the data loader", "the async handling", "the state management"],
-    "{dataset}": ["sales data", "user logs", "sensor data"],
-    "{metric}": ["conversion rate", "user engagement", "stock price"],
-    "{finding}": ["seasonal trends", "user location", "ad spend"],
-    "{task}": ["ETL", "data viz", "model training"],
-    "{model}": ["regression", "neural net", "prophet"],
-    "{old_tech}": ["jQuery", "AngularJS", "legacy PHP"],
-    "{new_tech}": ["Svelte", "Next.js", "FastAPI"],
-    "{feature}": ["checkout page", "auth flow", "dashboard"],
-    "{browser}": ["Safari", "Chrome", "Firefox"],
-    "{framework_a}": ["React", "Vue"],
-    "{framework_b}": ["Svelte", "Angular"],
-    "{stock}": ["TSLA", "AAPL", "GOOGL", "AMZN"],
-    "{sentiment}": ["undervalued", "overvalued", "volatile"],
-    "{market_event}": ["Fed rate hike", "CPI report"],
-    "{sector}": ["tech", "healthcare", "energy"],
-    "{movement}": ["10% upside", "20% drop"],
-    "{quarter}": ["1", "2", "3", "4"],
-    "{company}": ["Enron", "Meta", "startup X"],
-    "{player}": ["LeBron", "Jordan", "Curry", "Wemby"],
-    "{team}": ["Lakers", "Celtics", "Knicks", "Bulls"],
-    "{game}": ["Hades", "Hollow Knight", "Dave the Diver"],
-    "{genre}": ["metroidvania", "roguelike", "farming sim"],
-    "{aaa_game}": ["Call of Duty", "Assassin's Creed"],
-    "{policy}": ["tax bill", "healthcare reform"],
-    "{group}": ["small businesses", "students"],
-    "{politician}": ["the president", "senator X"],
-    "{issue}": ["climate change", "the economy"],
-    "{election}": ["midterm", "primary"],
-    "{city}": ["Tokyo", "Rome", "Bangkok"],
-    "{food}": ["ramen", "pasta", "pad thai"],
-    "{country}": ["Italy", "Thailand", "Argentina"],
-    "{activity}": ["hiking", "scuba diving", "visiting museums"],
-    "{airline}": ["Ryanair", "Spirit"],
-    "{landmark}": ["the Alps", "the coastline"],
-    "{dish}": ["beef bourguignon", "a souffle", "pho"],
-    "{ingredient}": ["cardamom", "truffle oil"],
-    "{technique}": ["sous-vide", "maillard reaction"],
-    "{secret}": ["more butter", "patience"],
-    "{texture}": ["soggy", "dense"]
+FILLERS = {
+    "{topic}": ["RAG systems", "scaling laws", "transfer learning", "transformers"],
+    "{field}": ["NLP", "computer vision", "time series", "recommendation systems"],
+    "{finding}": ["a strong seasonality", "feature leakage", "surprising correlation with location"],
+    "{detail}": ["serving latency", "data drift", "memory consumption"],
+    "{library}": ["PyTorch", "scikit-learn", "HuggingFace"],
+    "{dataset}": ["public sales dataset", "user logs", "open research dataset"],
+    "{method}": ["regression", "clustering", "causal inference"],
+    "{approach}": ["grouped bar charts", "small multiples"],
+    "{error}": ["TypeError", "MemoryError"],
+    "{event}": ["major acquisition", "regulatory change", "product recall"],
+    "{sector}": ["cloud", "consumer tech", "finance"],
+    "{headline}": ["Major diplomatic development in X", "Unexpected election result"],
+    "{details}": ["official statements", "witness reports"],
+    "{policy}": ["new tax bill", "privacy regulation"],
+    "{subject}": ["microbiome diversity", "quantum computing"],
+    "{concept}": ["Bayesian priors", "p-hacking"],
+    "{product}": ["Widget 2.0", "NewPhone X"],
+    "{links}": ["link1, link2", "a thread summarizing the event"],
+    "{interpretation}": ["a sign of polarization", "regional shift"],
+    "{movie}": ["A Great Film", "A Sci-Fi Hit"],
+    "{reason}": ["it reframed the protagonist", "it used time non-linearly"],
+    "{list}": ["Film A, Film B, Film C"],
+    "{stock}": ["AAPL", "TSLA", "MSFT"],
+    "{catalyst}": ["earnings beat", "guidance change"],
+    "{thesis}": ["valuation mismatch", "growth runway"],
+    "{macro_event}": ["rate hike", "trade tensions"],
+    "{game}": ["Tiny Quest", "Rogue Pixel"],
+    "{work}": ["AI pathfinding", "art assets"],
+    "{roadmap}": ["alpha in 2 months", "demo at conference"]
 }
 
-# -------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------
-def get_random_timestamp() -> str:
-    """Generate a timestamp within the last 30 days."""
+
+def get_random_timestamp(days_back: int = 14) -> str:
+    """Generate a timestamp within the last `days_back` days."""
     now = datetime.now(timezone.utc)
     delta = timedelta(
-        days=random.randint(0, 30),
+        days=random.randint(0, days_back),
         hours=random.randint(0, 23),
         minutes=random.randint(0, 59)
     )
-    return (now - delta).isoformat() + "Z"
+    return (now - delta).isoformat()
 
 
-def generate_post_content(personas: List[str]) -> str:
-    """Generate a synthetic post based on persona templates."""
-    persona = random.choices(personas, weights=[0.7, 0.3], k=1)[0]
-    template = random.choice(POST_TEMPLATES[persona])
-    content = template
-    for placeholder, options in TOPIC_FILLERS.items():
-        if placeholder in content:
-            content = content.replace(placeholder, random.choice(options), 1)
-    return content
+def generate_title_and_body(subreddit: str) -> (str, str):
+    """Pick a template for the subreddit and fill placeholders."""
+    sub = subreddit.lower()
+    templates = SUBREDDIT_TEMPLATES.get(sub, SUBREDDIT_TEMPLATES.get("technology"))
+    title_tpl, body_tpl = random.choice(templates)
+    for placeholder, options in FILLERS.items():
+        if placeholder in title_tpl:
+            title_tpl = title_tpl.replace(placeholder, random.choice(options), 1)
+        if placeholder in body_tpl:
+            body_tpl = body_tpl.replace(placeholder, random.choice(options), 1)
+    return title_tpl, body_tpl
+
 
 # -------------------------------------------------------------------
 # Main Stage Function
 # -------------------------------------------------------------------
 def main() -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
-    logger.info("Starting Stage 2: Generate Posts & Follows")
+    logger.info("Starting Stage 2: Generate Reddit-style Posts & Follows")
 
     if SEED is not None:
         random.seed(SEED)
 
-    # Check prerequisites
     ok, msg = check_file_prerequisites(2)
     if not ok:
         logger.error(f"Stage 2 prerequisite failed: {msg}")
@@ -189,24 +159,29 @@ def main() -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
 
     # Generate posts
     all_posts: List[Dict[str, Any]] = []
-    logger.info("Generating synthetic posts...")
+    logger.info("Generating synthetic Reddit-style posts...")
 
     for user in tqdm(users, desc="Generating Posts"):
         user_id = user["user_id"]
-        personas = user["personas"]
-
-        num_posts = random.randint(
-            AVG_POSTS_PER_USER - 15,
-            AVG_POSTS_PER_USER + 15
-        )
+        subs = user.get("subreddits") or ["technology"]
+        num_posts = random.randint(AVG_POSTS_PER_USER - 15, AVG_POSTS_PER_USER + 15)
 
         for _ in range(num_posts):
-            all_posts.append({
-                "post_id": str(uuid.uuid4()),
+            subreddit = random.choice(subs)
+            title, selftext = generate_title_and_body(subreddit)
+            content = f"{title}\n\n{selftext}"
+            post = {
+                "post_id": f"reddit_{uuid.uuid4().hex[:12]}",
                 "author_id": user_id,
-                "content": generate_post_content(personas),
-                "created_at": get_random_timestamp()
-            })
+                "subreddit": subreddit,
+                "title": title,
+                "selftext": selftext,
+                "content": content,
+                "created_at": get_random_timestamp(days_back=14),
+                "score": random.randint(0, 1200),
+                "num_comments": random.randint(0, 400)
+            }
+            all_posts.append(post)
 
     logger.info(f"Generated {len(all_posts)} total posts.")
 
